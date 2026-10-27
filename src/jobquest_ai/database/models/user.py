@@ -4,7 +4,9 @@ from sqlalchemy import Boolean, DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from jobquest_ai.database.connection import Base
-
+from jobquest_ai.database.models.resume import Resume
+from jobquest_ai.database.models.application import Application
+from jobquest_ai.database.models.conversation import Conversation
 
 class User(Base):
     __tablename__ = "users"

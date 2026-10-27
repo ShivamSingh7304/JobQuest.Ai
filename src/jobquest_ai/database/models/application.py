@@ -10,7 +10,9 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from jobquest_ai.database.connection import Base
-
+from jobquest_ai.database.models.user import User
+from jobquest_ai.database.models.job import Job
+from jobquest_ai.database.models.resume import Resume
 
 class Application(Base):
     __tablename__ = "applications"

@@ -4,7 +4,7 @@ from sqlalchemy import DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from jobquest_ai.database.connection import Base
-
+from jobquest_ai.database.models.user import User
 
 class Conversation(Base):
     __tablename__ = "conversations"
