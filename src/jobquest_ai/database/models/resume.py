@@ -7,6 +7,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from jobquest_ai.database.connection import Base
+from jobquest_ai.database.models.user import User
+from jobquest_ai.database.models.application import Application
 
 
 class Resume(Base):
