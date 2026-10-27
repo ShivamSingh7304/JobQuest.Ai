@@ -274,15 +274,41 @@ def _job_experience_range(job_text: str) -> tuple[float | None, float | None]:
     return None, None
 
 
+
 def _level_from_text(text: str) -> str | None:
     text = _normalize_text(text)
-    if any(term in text for term in ("intern", "entry-level", "entry level", "junior", "graduate", "associate")):
+
+    if any(term in text for term in (
+        "fresher",
+        "fresh graduate",
+        "new graduate",
+        "intern",
+        "entry-level",
+        "entry level",
+        "junior",
+        "graduate",
+        "associate",
+    )):
         return "entry"
-    if any(term in text for term in ("senior", "staff engineer", "principal", "lead engineer", "director")):
+
+    if any(term in text for term in (
+        "senior",
+        "staff engineer",
+        "principal",
+        "lead engineer",
+        "director",
+    )):
         return "senior"
-    if any(term in text for term in ("mid-level", "mid level", "intermediate")):
+
+    if any(term in text for term in (
+        "mid-level",
+        "mid level",
+        "intermediate",
+    )):
         return "mid"
+
     return None
+
 
 
 def _experience_score(
