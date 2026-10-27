@@ -3,6 +3,7 @@
 .env
 .env.*
 !.env.example
+oauth-client.json
 
 # Python
 __pycache__/
