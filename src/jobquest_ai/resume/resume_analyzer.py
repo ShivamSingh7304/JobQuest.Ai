@@ -148,7 +148,10 @@ def _build_analyzer():
             api_key=api_key,
         )
 
-        return llm.with_structured_output(ResumeAnalysis)
+        return llm.with_structured_output(
+            ResumeAnalysis,
+            method="json_mode",
+        )
 
     except Exception as exc:
         raise ResumeAnalysisError(
