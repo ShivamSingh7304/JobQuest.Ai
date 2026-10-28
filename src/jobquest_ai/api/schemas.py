@@ -16,6 +16,15 @@ class ChatResponse(BaseModel):
     response: str
 
 
+class ResumeTailorRequest(BaseModel):
+    job_description: str = Field(
+        ...,
+        min_length=1,
+        max_length=15_000,
+        description="The target job description.",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Conversations
 # ---------------------------------------------------------------------------
