@@ -4,10 +4,13 @@
 from pathlib import Path
 from typing import Any
 
+from langchain_core.tools import tool
+
 from jobquest_ai.resume.resume_parser import parse_resume
 from jobquest_ai.resume.resume_analyzer import analyze_resume
 
 
+@tool
 def analyze_uploaded_resume(file_path: str) -> dict[str, Any]:
     """
     Parse and analyze an uploaded resume.
@@ -27,15 +30,18 @@ def analyze_uploaded_resume(file_path: str) -> dict[str, Any]:
     if not path.is_file():
         raise FileNotFoundError(f"Resume file not found: {file_path}")
 
-    resume_text = parse_resume(str(path))
+    parsed_resume = parse_resume(str(path))
 
-    if not isinstance(resume_text, str) or not resume_text.strip():
+    if not isinstance(parsed_resume, dict) or not parsed_resume.get("text", "").strip():
         raise ValueError("No readable text was extracted from the resume.")
 
-    analysis = analyze_resume(resume_text)
+    analysis = analyze_resume(parsed_resume)
 
     return {
         "success": True,
         "file_name": path.name,
-        "analysis": analysis,
+        "analysis": analysis.model_dump(),
     }
+
+
+TOOLS = [analyze_uploaded_resume]
