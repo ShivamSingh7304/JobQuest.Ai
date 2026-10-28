@@ -65,6 +65,44 @@ class JobMatchResponse(BaseModel):
     jobs: list[dict]
 
 
+ApplicationStatus = Literal[
+    "saved",
+    "pending_approval",
+    "approved",
+    "submitted",
+    "interviewing",
+    "rejected",
+    "offer",
+    "withdrawn",
+]
+
+
+class ApplicationCreate(BaseModel):
+    job_id: int = Field(..., gt=0)
+    resume_id: int | None = Field(default=None, gt=0)
+    status: ApplicationStatus = "saved"
+    notes: str | None = Field(default=None, max_length=32_000)
+
+
+class ApplicationUpdate(BaseModel):
+    status: ApplicationStatus | None = None
+    notes: str | None = Field(default=None, max_length=32_000)
+
+
+class ApplicationResponse(BaseModel):
+    id: int
+    user_id: int
+    job_id: int
+    resume_id: int | None
+    status: ApplicationStatus
+    applied_at: datetime | None
+    notes: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # ---------------------------------------------------------------------------
 # Conversations
 # ---------------------------------------------------------------------------
