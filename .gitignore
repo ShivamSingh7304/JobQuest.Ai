@@ -46,3 +46,4 @@ src/jobquest/memory/profiles/*
 .idea/
 .DS_Store
 Thumbs.db
+*/__pycache__/
