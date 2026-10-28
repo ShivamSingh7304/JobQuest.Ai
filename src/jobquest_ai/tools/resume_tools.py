@@ -32,7 +32,15 @@ def analyze_uploaded_resume(file_path: str) -> dict[str, Any]:
 
     parsed_resume = parse_resume(str(path))
 
-    if not isinstance(parsed_resume, dict) or not parsed_resume.get("text", "").strip():
+    if isinstance(parsed_resume, dict):
+        resume_text = parsed_resume.get("text", "")
+    elif isinstance(parsed_resume, str):
+        resume_text = parsed_resume
+        parsed_resume = {"text": resume_text}
+    else:
+        raise ValueError("Resume parser returned an invalid result.")
+
+    if not isinstance(resume_text, str) or not resume_text.strip():
         raise ValueError("No readable text was extracted from the resume.")
 
     analysis = analyze_resume(parsed_resume)
