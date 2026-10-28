@@ -1,4 +1,3 @@
-
 """Tools for resume processing in JobQuest.Ai."""
 
 from pathlib import Path
@@ -6,25 +5,13 @@ from typing import Any
 
 from langchain_core.tools import tool
 
-from jobquest_ai.resume.resume_parser import parse_resume
 from jobquest_ai.resume.resume_analyzer import analyze_resume
+from jobquest_ai.resume.resume_parser import parse_resume
 
 
 @tool
 def analyze_uploaded_resume(file_path: str) -> dict[str, Any]:
-    """
-    Parse and analyze an uploaded resume.
-
-    Args:
-        file_path: Path to the uploaded resume file.
-
-    Returns:
-        A dictionary containing the resume analysis.
-
-    Raises:
-        FileNotFoundError: If the resume file does not exist.
-        ValueError: If no readable resume text is extracted.
-    """
+    """Parse and analyze an uploaded resume."""
     path = Path(file_path)
 
     if not path.is_file():
