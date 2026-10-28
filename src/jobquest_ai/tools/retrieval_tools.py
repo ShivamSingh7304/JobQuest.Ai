@@ -3,9 +3,12 @@
 
 from typing import Any
 
+from langchain_core.tools import tool
+
 from jobquest_ai.retrieval.retriever import retrieve
 
 
+@tool
 def search_knowledge(query: str, k: int = 4) -> dict[str, Any]:
     """
     Retrieve relevant documents for a user query.
@@ -44,3 +47,6 @@ def search_knowledge(query: str, k: int = 4) -> dict[str, Any]:
         "count": len(results),
         "results": results,
     }
+
+
+TOOLS = [search_knowledge]
