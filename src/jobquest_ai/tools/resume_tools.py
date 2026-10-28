@@ -1,36 +1,41 @@
-"""Resume analysis and tailoring tools."""
 
-from langchain_core.tools import tool
+"""Tools for resume processing in JobQuest.Ai."""
 
+from pathlib import Path
+from typing import Any
 
-@tool
-def analyze_resume(
-    resume_text: str,
-    target_role: str,
-) -> str:
-    """Create a resume review checklist for a target role."""
-
-    return (
-        f"Resume review for {target_role}\n"
-        f"Resume length: {len(resume_text)} characters\n"
-        "Review role-specific skills, measurable achievements, clear "
-        "formatting, and relevant keywords."
-    )
+from jobquest_ai.resume.resume_parser import parse_resume
+from jobquest_ai.resume.resume_analyzer import analyze_resume
 
 
-@tool
-def tailor_resume_section(
-    section_text: str,
-    target_role: str,
-) -> str:
-    """Suggest how to tailor a resume section to a target role."""
+def analyze_uploaded_resume(file_path: str) -> dict[str, Any]:
+    """
+    Parse and analyze an uploaded resume.
 
-    return (
-        f"Resume section tailoring for {target_role}\n"
-        f"Current section:\n{section_text}\n"
-        "Emphasize relevant accomplishments and skills using concise, "
-        "evidence-based wording. Keep all claims accurate."
-    )
+    Args:
+        file_path: Path to the uploaded resume file.
 
+    Returns:
+        A dictionary containing the resume analysis.
 
-TOOLS = [analyze_resume, tailor_resume_section]
+    Raises:
+        FileNotFoundError: If the resume file does not exist.
+        ValueError: If no readable resume text is extracted.
+    """
+    path = Path(file_path)
+
+    if not path.is_file():
+        raise FileNotFoundError(f"Resume file not found: {file_path}")
+
+    resume_text = parse_resume(str(path))
+
+    if not isinstance(resume_text, str) or not resume_text.strip():
+        raise ValueError("No readable text was extracted from the resume.")
+
+    analysis = analyze_resume(resume_text)
+
+    return {
+        "success": True,
+        "file_name": path.name,
+        "analysis": analysis,
+    }
