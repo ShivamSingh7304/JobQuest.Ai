@@ -1,6 +1,6 @@
 
-import hashlib
 import os
+import uuid
 from functools import lru_cache
 from pathlib import Path
 
@@ -74,9 +74,7 @@ def _document_id(document: Document) -> str:
 
     value = f"{source}\0{content}"
 
-    return hashlib.sha256(
-        value.encode("utf-8")
-    ).hexdigest()
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, value))
 
 
 def add_documents(documents: list[Document]) -> list[str]:
