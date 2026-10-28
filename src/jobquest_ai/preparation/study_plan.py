@@ -9,6 +9,15 @@ from jobquest_ai.preparation.skill_gap_analyzer import SkillGapAnalysis
 
 Priority = Literal["high", "medium", "low"]
 
+class PreparationTask(BaseModel):
+    """A personalized interview preparation activity."""
+
+    topic: str
+    priority: Literal["high", "medium", "low"]
+    estimated_hours: float = Field(gt=0, le=8)
+    activity: str
+    reason: str
+    success_criteria: str
 
 class StudyTask(BaseModel):
     """A single preparation task."""
@@ -18,6 +27,7 @@ class StudyTask(BaseModel):
     estimated_hours: float = Field(gt=0)
     activity: str
     reason: str
+    success_criteria: str
 
 
 class DailyStudyPlan(BaseModel):
@@ -100,11 +110,43 @@ def _activity_for_category(category: str) -> str:
     return "Review the fundamentals, practise questions, and test your understanding."
 
 
+
+def _activity_for_skill(skill_name: str, category: str) -> str:
+    """Choose a practical learning activity for a specific skill."""
+
+    skill = skill_name.strip().lower()
+
+    if "python" in skill:
+        return (
+            "Practise Python collections, OOP, and common coding problems."
+        )
+
+    if "sql" in skill or "database" in skill:
+        return (
+            "Practise SQL joins, subqueries, and writing database queries."
+        )
+
+    if "rest api" in skill or "api" in skill:
+        return (
+            "Practise HTTP methods, API design, input validation, "
+            "and error handling."
+        )
+
+    if "project architecture" in skill or "architecture" in skill:
+        return (
+            "Review project architecture, design decisions, trade-offs, "
+            "and system components."
+        )
+
+    return _activity_for_category(category)
+
+
 def generate_study_plan(
     analysis: SkillGapAnalysis,
     interview_date: date,
     daily_available_hours: float = 2.0,
     start_date: date | None = None,
+    preparation_tasks: list[PreparationTask] | None = None,
 ) -> StudyPlan:
     """
     Generate a deterministic daily preparation plan.
@@ -146,65 +188,133 @@ def generate_study_plan(
     number_of_days = (interview_date - start_date).days + 1
     total_available_hours = number_of_days * float(daily_available_hours)
 
-    # Prefer identified gaps. If no gaps were found, prepare all required skills.
+    
+    # Use generated preparation tasks when provided.
+    # Otherwise, derive topics from the skill-gap analysis.
     topics = []
 
-    if analysis.potential_gaps:
-        for gap in analysis.potential_gaps:
-            priority = _normalize_priority(gap.priority)
-            skill_name = gap.skill.strip()
-
-            if not skill_name:
-                continue
-
-            matching_skill = next(
-                (
-                    skill
-                    for skill in analysis.required_skills
-                    if skill.name.strip().lower() == skill_name.lower()
-                ),
-                None,
+    if preparation_tasks is not None:
+        if not isinstance(preparation_tasks, list):
+            raise StudyPlanError(
+                "preparation_tasks must be a list."
             )
 
-            category = matching_skill.category if matching_skill else "general"
+        
+        for task in preparation_tasks:
+            # Accept PreparationTask objects created by other modules,
+            # provided they contain the expected fields.
+            if isinstance(task, PreparationTask):
+                task_data = task.model_dump()
+            elif isinstance(task, BaseModel):
+                task_data = task.model_dump()
+            elif isinstance(task, dict):
+                task_data = task
+            else:
+                raise StudyPlanError(
+                    "Each preparation task must be a valid task object."
+                )
+
+            try:
+                validated_task = PreparationTask.model_validate(task_data)
+            except Exception as exc:
+                raise StudyPlanError(
+                    f"Invalid preparation task: {exc}"
+                ) from exc
 
             topics.append(
                 {
-                    "name": skill_name,
-                    "priority": priority,
-                    "hours": _estimate_hours(priority, category),
-                    "activity": _activity_for_category(category),
-                    "reason": gap.reason.strip()
-                    or "Identified as a potential preparation gap.",
+                    "name": validated_task.topic.strip(),
+                    "priority": _normalize_priority(
+                        validated_task.priority
+                    ),
+                    "hours": float(validated_task.estimated_hours),
+                    "activity": validated_task.activity.strip(),
+                    "reason": validated_task.reason.strip(),
+                    "success_criteria": (
+                        validated_task.success_criteria.strip()
+                    ),
                 }
             )
+
+
+        if any(not topic["name"] for topic in topics):
+            raise StudyPlanError(
+                "Preparation task topics must not be empty."
+            )
+
     else:
-        for skill in analysis.required_skills:
-            skill_name = skill.name.strip()
+        # Prefer identified gaps. If no gaps were found, prepare all required skills.
+        if analysis.potential_gaps:
+            for gap in analysis.potential_gaps:
+                priority = _normalize_priority(gap.priority)
+                skill_name = gap.skill.strip()
 
-            if not skill_name:
-                continue
+                if not skill_name:
+                    continue
 
-            priority = _normalize_priority(skill.importance)
+                matching_skill = next(
+                    (
+                        skill
+                        for skill in analysis.required_skills
+                        if skill.name.strip().lower() == skill_name.lower()
+                    ),
+                    None,
+                )
 
-            topics.append(
-                {
-                    "name": skill_name,
-                    "priority": priority,
-                    "hours": _estimate_hours(priority, skill.category),
-                    "activity": _activity_for_category(skill.category),
-                    "reason": "Review this job requirement before the interview.",
-                }
-            )
+                category = (
+                    matching_skill.category
+                    if matching_skill
+                    else "general"
+                )
+
+                topics.append(
+                    {
+                        "name": skill_name,
+                        "priority": priority,
+                        "hours": _estimate_hours(priority, category),
+                        "activity": _activity_for_skill(skill_name, category),
+                        "reason": (
+                            gap.reason.strip()
+                            or "Identified as a potential preparation gap."
+                        ),
+                    }
+                )
+        else:
+            for skill in analysis.required_skills:
+                skill_name = skill.name.strip()
+
+                if not skill_name:
+                    continue
+
+                priority = _normalize_priority(skill.importance)
+
+                topics.append(
+                    {
+                        "name": skill_name,
+                        "priority": priority,
+                        "hours": _estimate_hours(
+                            priority,
+                            skill.category,
+                        ),
+                        "activity": _activity_for_skill(skill_name, category),
+                        "reason": (
+                            "Review this job requirement before the interview."
+                        ),
+                    }
+                )
 
     # Avoid scheduling the same topic more than once.
-    unique_topics = {}
-    for topic in topics:
-        key = topic["name"].lower()
-        if key not in unique_topics:
-            unique_topics[key] = topic
+    # Generated tasks may share a topic but have different activities.
+    # Preserve them; only deduplicate automatically derived topics.
+    if preparation_tasks is None:
+        unique_topics = {}
 
-    topics = list(unique_topics.values())
+        for topic in topics:
+            key = topic["name"].lower()
+            if key not in unique_topics:
+                unique_topics[key] = topic
+
+        topics = list(unique_topics.values())
 
     priority_rank = {"high": 0, "medium": 1, "low": 2}
     topics.sort(
@@ -258,6 +368,10 @@ def generate_study_plan(
                         topic["reason"]
                         if first_day_for_topic
                         else "Continue practising and reviewing this topic."
+                    ),
+                    success_criteria=topic.get(
+                    "success_criteria",
+                    "Complete the activity and explain the key concepts.",
                     ),
                 )
             )

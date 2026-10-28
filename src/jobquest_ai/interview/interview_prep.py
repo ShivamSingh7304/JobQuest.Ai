@@ -17,7 +17,6 @@ from jobquest_ai.preparation.skill_gap_analyzer import (
     analyze_skill_gaps,
 )
 from jobquest_ai.preparation.study_plan import (
-    PreparationTask,
     StudyPlan,
     StudyPlanError,
     generate_study_plan,
