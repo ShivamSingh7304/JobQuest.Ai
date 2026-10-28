@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from jobquest_ai.api.routes.auth import router as auth_router
 from jobquest_ai.api.routes.chat import router as chat_router
+from jobquest_ai.api.routes.jobs import router as jobs_router
 from jobquest_ai.api.routes.resumes import router as resumes_router
 from jobquest_ai.database.connection import create_tables
 
@@ -14,6 +15,7 @@ app = FastAPI(title="JobQuest.Ai API")
 
 app.include_router(auth_router)
 app.include_router(chat_router)
+app.include_router(jobs_router)
 app.include_router(resumes_router)
 
 

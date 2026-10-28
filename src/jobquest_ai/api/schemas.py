@@ -25,6 +25,46 @@ class ResumeTailorRequest(BaseModel):
     )
 
 
+class JobMatchRequest(BaseModel):
+    resume_id: int = Field(..., gt=0, description="The resume to match against.")
+    query: str = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        description="Role, keyword, or job search query.",
+    )
+    country: str = Field(
+        default="India",
+        min_length=1,
+        max_length=100,
+        description="Country used by the job search provider.",
+    )
+    limit: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="Maximum number of ranked jobs to return.",
+    )
+    max_pages: int = Field(
+        default=2,
+        ge=1,
+        le=5,
+        description="Maximum number of provider pages to search.",
+    )
+
+
+class JobMatchResponse(BaseModel):
+    query: str
+    country: str
+    total_count: int | None
+    pages_fetched: int
+    fetched_job_count: int
+    rejected_job_count: int
+    matched_job_count: int
+    match_score_type: str
+    jobs: list[dict]
+
+
 # ---------------------------------------------------------------------------
 # Conversations
 # ---------------------------------------------------------------------------
