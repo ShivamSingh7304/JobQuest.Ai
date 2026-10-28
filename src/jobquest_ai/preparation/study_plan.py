@@ -10,6 +10,16 @@ from jobquest_ai.preparation.skill_gap_analyzer import SkillGapAnalysis
 Priority = Literal["high", "medium", "low"]
 
 
+class PreparationTask(BaseModel):
+    """A personalized task generated for interview preparation."""
+
+    topic: str
+    priority: Priority
+    estimated_hours: float = Field(gt=0, le=8)
+    activity: str
+    reason: str
+    success_criteria: str
+
 class StudyTask(BaseModel):
     """A single preparation task."""
 
@@ -18,6 +28,7 @@ class StudyTask(BaseModel):
     estimated_hours: float = Field(gt=0)
     activity: str
     reason: str
+    success_criteria: str | None = None
 
 
 class DailyStudyPlan(BaseModel):
@@ -80,24 +91,126 @@ def _estimate_hours(priority: Priority, category: str) -> float:
     return base_hours
 
 
-def _activity_for_category(category: str) -> str:
-    """Choose a practical learning activity for a topic."""
+def _activity_for_skill(skill_name: str, category: str) -> str:
+    """Choose a practical activity based on the skill and its category."""
 
-    category = category.lower()
+    skill = skill_name.strip().lower()
+    category = category.strip().lower()
 
+    # Resume and project preparation
+    if any(
+        keyword in skill
+        for keyword in ("project", "architecture", "system design")
+    ) or any(keyword in category for keyword in ("project", "resume")):
+        return (
+            "Review a relevant project, draw its architecture, and practise "
+            "explaining design decisions, trade-offs, challenges, and failures."
+        )
+
+    # Programming languages
+    if "python" in skill:
+        return (
+            "Solve Python exercises involving collections, functions, "
+            "exceptions, and OOP. Explain your approach and time complexity."
+        )
+
+    if any(keyword in skill for keyword in ("java", "c++", "cpp", "c language")):
+        return (
+            "Solve language-specific coding problems and practise OOP, "
+            "collections, memory concepts, and debugging where applicable."
+        )
+
+    # Databases and SQL
+    if any(
+        keyword in skill
+        for keyword in ("sql", "database", "postgresql", "mysql")
+    ) or "database" in category:
+        return (
+            "Write queries using joins, aggregations, subqueries, and "
+            "appropriate filtering. Practise explaining query results."
+        )
+
+    # Backend and API development
+    if any(
+        keyword in skill
+        for keyword in ("rest api", "api development", "http", "fastapi")
+    ) or "backend" in category:
+        return (
+            "Design example API endpoints and practise HTTP methods, "
+            "status codes, input validation, error handling, and testing."
+        )
+
+    # Data structures and algorithms
+    if any(
+        keyword in skill
+        for keyword in (
+            "data structure", "algorithm", "dsa",
+            "problem solving", "time complexity",
+        )
+    ):
+        return (
+            "Solve relevant coding problems, explain the approach, "
+            "compare alternatives, and analyse time and space complexity."
+        )
+
+    # Machine learning and AI
+    if any(
+        keyword in skill
+        for keyword in (
+            "machine learning", "deep learning", "artificial intelligence",
+            "classification", "regression", "nlp", "llm",
+            "rag", "generative ai",
+        )
+    ) or any(keyword in category for keyword in ("ai/ml", "machine learning")):
+        return (
+            "Explain the concept using an example, compare suitable methods, "
+            "and practise discussing evaluation metrics, limitations, "
+            "and trade-offs."
+        )
+
+    # Operating systems and computer networks
+    if any(
+        keyword in skill
+        for keyword in ("operating system", "process scheduling", "deadlock")
+    ):
+        return (
+            "Revise core operating-system concepts and practise explaining "
+            "processes, threads, synchronization, and deadlocks."
+        )
+
+    if any(
+        keyword in skill
+        for keyword in ("computer network", "networking", "tcp/ip", "dns")
+    ):
+        return (
+            "Practise explaining networking fundamentals, HTTP versus HTTPS, "
+            "DNS, TCP versus UDP, and request-response flow."
+        )
+
+    # Behavioural and communication preparation
+    if any(
+        keyword in skill
+        for keyword in ("behavioral", "behavioural", "communication", "leadership")
+    ) or any(keyword in category for keyword in ("behavioral", "communication")):
+        return (
+            "Prepare truthful examples from your experience and practise "
+            "answering aloud using the situation, task, action, and result."
+        )
+
+    # General technical fallback
     if any(
         keyword in category
         for keyword in ("programming", "coding", "technical", "algorithm")
     ):
-        return "Study the concept, solve coding problems, and explain your solution."
+        return (
+            "Review the topic fundamentals, solve relevant practice questions, "
+            "and explain your solution and reasoning."
+        )
 
-    if any(keyword in category for keyword in ("behavioral", "hr", "communication")):
-        return "Prepare examples from your experience and practise answering aloud."
-
-    if any(keyword in category for keyword in ("project", "resume")):
-        return "Review your project architecture, decisions, trade-offs, and challenges."
-
-    return "Review the fundamentals, practise questions, and test your understanding."
+    return (
+        "Review the topic fundamentals, practise representative questions, "
+        "and check your understanding by explaining the answers aloud."
+    )
 
 
 def generate_study_plan(
@@ -105,6 +218,7 @@ def generate_study_plan(
     interview_date: date,
     daily_available_hours: float = 2.0,
     start_date: date | None = None,
+    preparation_tasks: list[PreparationTask] | None = None,
 ) -> StudyPlan:
     """
     Generate a deterministic daily preparation plan.
@@ -146,65 +260,110 @@ def generate_study_plan(
     number_of_days = (interview_date - start_date).days + 1
     total_available_hours = number_of_days * float(daily_available_hours)
 
-    # Prefer identified gaps. If no gaps were found, prepare all required skills.
+    # Use personalized tasks when provided; otherwise retain the
+    # existing rule-based topic generation.
     topics = []
 
-    if analysis.potential_gaps:
-        for gap in analysis.potential_gaps:
-            priority = _normalize_priority(gap.priority)
-            skill_name = gap.skill.strip()
+    if preparation_tasks is not None:
+        for task in preparation_tasks:
+            skill_name = task.topic.strip()
 
             if not skill_name:
                 continue
 
-            matching_skill = next(
-                (
-                    skill
-                    for skill in analysis.required_skills
-                    if skill.name.strip().lower() == skill_name.lower()
-                ),
-                None,
-            )
-
-            category = matching_skill.category if matching_skill else "general"
-
             topics.append(
                 {
                     "name": skill_name,
-                    "priority": priority,
-                    "hours": _estimate_hours(priority, category),
-                    "activity": _activity_for_category(category),
-                    "reason": gap.reason.strip()
-                    or "Identified as a potential preparation gap.",
+                    "priority": task.priority,
+                    "hours": task.estimated_hours,
+                    "activity": task.activity,
+                    "reason": task.reason,
+                    "success_criteria": task.success_criteria,
                 }
             )
+
     else:
-        for skill in analysis.required_skills:
-            skill_name = skill.name.strip()
+        # Prefer identified gaps. If no gaps were found,
+        # prepare all required skills.
+        if analysis.potential_gaps:
+            for gap in analysis.potential_gaps:
+                priority = _normalize_priority(gap.priority)
+                skill_name = gap.skill.strip()
 
-            if not skill_name:
-                continue
+                if not skill_name:
+                    continue
 
-            priority = _normalize_priority(skill.importance)
+                matching_skill = next(
+                    (
+                        skill
+                        for skill in analysis.required_skills
+                        if skill.name.strip().lower()
+                        == skill_name.lower()
+                    ),
+                    None,
+                )
 
-            topics.append(
-                {
-                    "name": skill_name,
-                    "priority": priority,
-                    "hours": _estimate_hours(priority, skill.category),
-                    "activity": _activity_for_category(skill.category),
-                    "reason": "Review this job requirement before the interview.",
-                }
-            )
+                category = (
+                    matching_skill.category
+                    if matching_skill
+                    else "general"
+                )
 
-    # Avoid scheduling the same topic more than once.
+                topics.append(
+                    {
+                        "name": skill_name,
+                        "priority": priority,
+                        "hours": _estimate_hours(priority, category),
+                        "activity": _activity_for_skill(
+                            skill_name, category
+                        ),
+                        "reason": gap.reason.strip()
+                        or "Identified as a potential preparation gap.",
+                        "success_criteria": None,
+                    }
+                )
+        else:
+            for skill in analysis.required_skills:
+                skill_name = skill.name.strip()
+
+                if not skill_name:
+                    continue
+
+                priority = _normalize_priority(skill.importance)
+
+                topics.append(
+                    {
+                        "name": skill_name,
+                        "priority": priority,
+                        "hours": _estimate_hours(
+                            priority, skill.category
+                        ),
+                        "activity": _activity_for_skill(
+                            skill_name, skill.category
+                        ),
+                        "reason": (
+                            "Review this job requirement before the interview."
+                        ),
+                        "success_criteria": None,
+                    }
+                )
+
+    
+   # Preserve distinct personalized tasks, even when they share a topic.
+   # Only remove exact duplicates with the same topic and activity.
     unique_topics = {}
+
     for topic in topics:
-        key = topic["name"].lower()
+        key = (
+            topic["name"].strip().lower(),
+            topic["activity"].strip().lower(),
+        )
+
         if key not in unique_topics:
             unique_topics[key] = topic
 
     topics = list(unique_topics.values())
+
 
     priority_rank = {"high": 0, "medium": 1, "low": 2}
     topics.sort(
@@ -259,6 +418,7 @@ def generate_study_plan(
                         if first_day_for_topic
                         else "Continue practising and reviewing this topic."
                     ),
+                    success_criteria=topic.get("success_criteria")
                 )
             )
 
