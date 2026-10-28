@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -23,6 +23,18 @@ class ResumeTailorRequest(BaseModel):
         max_length=15_000,
         description="The target job description.",
     )
+
+
+class ResumeResponse(BaseModel):
+    id: int
+    user_id: int
+    original_filename: str
+    extracted_text: str | None
+    parsed_data: dict[str, Any] | None
+    version: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class JobMatchRequest(BaseModel):
