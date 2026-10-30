@@ -37,3 +37,9 @@ class Conversation(Base):
         cascade="all, delete-orphan",
         order_by="ConversationMessage.position",
     )
+
+    human_feedback: Mapped[list["HumanFeedback"]] = relationship(
+        "HumanFeedback",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+    )

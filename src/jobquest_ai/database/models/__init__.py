@@ -5,6 +5,7 @@ from jobquest_ai.database.models.application import Application
 from jobquest_ai.database.models.conversation import Conversation
 from jobquest_ai.database.models.conversation_message import ConversationMessage
 from jobquest_ai.database.models.user_memory import UserMemory
+from jobquest_ai.database.models.human_feedback import HumanFeedback
 
 __all__ = [
     "User",
@@ -14,4 +15,5 @@ __all__ = [
     "Conversation",
     "ConversationMessage",
     "UserMemory",
+    "HumanFeedback",
 ]

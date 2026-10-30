@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -14,6 +14,60 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
+
+
+ReviewDecision = Literal["approve", "request_changes"]
+
+
+class HumanFeedbackCreate(BaseModel):
+    decision: ReviewDecision
+    feedback: str | None = Field(default=None, max_length=32_000)
+    conversation_id: int | None = Field(default=None, gt=0)
+    message_id: int | None = Field(default=None, gt=0)
+    workflow_name: str | None = Field(default=None, min_length=1, max_length=100)
+    workflow_output_id: str | None = Field(
+        default=None, min_length=1, max_length=255
+    )
+
+    @model_validator(mode="after")
+    def validate_target(self):
+        conversation_target = (
+            self.conversation_id is not None or self.message_id is not None
+        )
+        workflow_target = (
+            self.workflow_name is not None or self.workflow_output_id is not None
+        )
+        if conversation_target == workflow_target:
+            raise ValueError(
+                "Provide either a conversation/message target or a workflow output target."
+            )
+        if workflow_target and not (
+            self.workflow_name and self.workflow_output_id
+        ):
+            raise ValueError(
+                "workflow_name and workflow_output_id are required together."
+            )
+        return self
+
+
+class HumanFeedbackUpdate(BaseModel):
+    decision: ReviewDecision
+    feedback: str | None = Field(default=None, max_length=32_000)
+
+
+class HumanFeedbackResponse(BaseModel):
+    id: int
+    user_id: int
+    decision: ReviewDecision
+    feedback: str | None
+    conversation_id: int | None
+    message_id: int | None
+    workflow_name: str | None
+    workflow_output_id: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class ResumeTailorRequest(BaseModel):
