@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +75,50 @@ class JobMatchResponse(BaseModel):
     matched_job_count: int
     match_score_type: str
     jobs: list[dict]
+
+
+class SaveJobRequest(BaseModel):
+    external_id: str = Field(..., min_length=1, max_length=255)
+    title: str = Field(..., min_length=1, max_length=255)
+    company_name: str = Field(..., min_length=1, max_length=255)
+    application_url: HttpUrl
+    description: str | None = Field(default=None, max_length=100_000)
+    excerpt: str | None = Field(default=None, max_length=10_000)
+    location_restrictions: list[str] = Field(default_factory=list, max_length=50)
+    employment_type: str | None = Field(default=None, max_length=100)
+    seniority: str | None = Field(default=None, max_length=100)
+    published_at: str | None = Field(default=None, max_length=100)
+
+    @field_validator("seniority", mode="before")
+    @classmethod
+    def normalize_seniority(cls, value):
+        if isinstance(value, (list, tuple)):
+            return ", ".join(str(item).strip() for item in value if str(item).strip())
+        return value
+
+    @field_validator("published_at", mode="before")
+    @classmethod
+    def normalize_published_at(cls, value):
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+        if isinstance(value, (list, tuple)):
+            return ", ".join(str(item).strip() for item in value if str(item).strip())
+        return value
+
+
+class SavedJobResponse(BaseModel):
+    job_id: int
+    external_job_id: str
+    source: str
+    title: str
+    company: str
+    description: str | None
+    location: str | None
+    employment_type: str | None
+    apply_url: str | None
+    posted_at: datetime | None
+
+    model_config = {"from_attributes": True}
 
 
 ApplicationStatus = Literal[
