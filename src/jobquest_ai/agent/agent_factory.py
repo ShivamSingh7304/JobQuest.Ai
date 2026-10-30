@@ -66,6 +66,7 @@ def build_agent(
                 model=config.groq_model,
                 temperature=0,
                 api_key=config.groq_api_key,
+                max_tokens=500,
             )
         except Exception as exc:
             raise AgentConfigurationError(
