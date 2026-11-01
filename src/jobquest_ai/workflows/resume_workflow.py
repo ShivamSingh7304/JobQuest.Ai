@@ -19,6 +19,7 @@ class ResumeWorkflowResult:
     target_role: str
     analysis: dict[str, Any]
     tailoring: TailoredResume
+    resume_id: int | None = None
     workflow_output_id: int | None = None
     status: str = "awaiting_review"
     original_content_unchanged: bool = True
@@ -34,6 +35,7 @@ class ResumeWorkflowResult:
             "workflow": "resume_analysis_and_tailoring",
             "status": self.status,
             "target_role": self.target_role,
+            "resume_id": self.resume_id,
             "workflow_output_id": self.workflow_output_id,
             "analysis": self.analysis,
             "tailoring": self.tailoring.model_dump(),
@@ -72,6 +74,7 @@ def run_resume_workflow(
     user_id: int | None = None,
     workflow_output_repository: Any | None = None,
     output_key: str | None = None,
+    source_resume_id: int | None = None,
 ) -> ResumeWorkflowResult:
     """Analyze resume content and produce role-specific, reviewable guidance.
 
@@ -112,6 +115,7 @@ def run_resume_workflow(
 
     result = ResumeWorkflowResult(
         target_role=role,
+        resume_id=source_resume_id,
         analysis=analysis,
         tailoring=tailored,
     )
@@ -137,6 +141,7 @@ def run_resume_workflow(
         )
         result = ResumeWorkflowResult(
             target_role=result.target_role,
+            resume_id=result.resume_id,
             analysis=result.analysis,
             tailoring=result.tailoring,
             workflow_output_id=output.id,

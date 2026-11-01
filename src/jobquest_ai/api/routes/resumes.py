@@ -3,12 +3,15 @@ from typing import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from jobquest_ai.api.schemas import (
     ResumeResponse,
     ResumeTailorRequest,
     ResumeWorkflowResponse,
+    SaveTailoredResumeRequest,
+    TailoredResumeResponse,
 )
 from jobquest_ai.auth.dependencies import get_current_user
 from jobquest_ai.database.connection import get_db
@@ -17,6 +20,10 @@ from jobquest_ai.database.repositories.resume_repository import ResumeRepository
 from jobquest_ai.database.repositories.workflow_output_repository import (
     WorkflowOutputRepository,
 )
+from jobquest_ai.database.repositories.human_feedback_repository import (
+    HumanFeedbackRepository,
+)
+from jobquest_ai.human_review.approval import check_persisted_approval
 from jobquest_ai.resume.resume_analyzer import (
     ResumeAnalysisError,
     analyze_resume,
@@ -31,6 +38,7 @@ from jobquest_ai.workflows.resume_workflow import (
     ResumeWorkflowError,
     run_resume_workflow,
 )
+from jobquest_ai.resume.pdf_generator import tailored_resume_to_pdf
 
 router = APIRouter(prefix="/resumes", tags=["Resumes"])
 RESUME_STORAGE_DIRECTORY = Path(__file__).resolve().parents[4] / "data" / "resumes"
@@ -159,6 +167,44 @@ def get_resume(
     return _resume_response(_get_owned_resume(resume_id, current_user, db))
 
 
+@router.get(
+    "/preview/{resume_id}",
+    summary="Preview an owned resume in the browser",
+)
+def preview_resume(
+    resume_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    resume = _get_owned_resume(resume_id, current_user, db)
+    path = Path(resume.file_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Resume file not found.")
+    media_type = "application/pdf" if path.suffix.lower() == ".pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=resume.original_filename,
+        content_disposition_type="inline",
+    )
+
+
+@router.delete(
+    "/{resume_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete an owned resume",
+)
+def delete_resume(
+    resume_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> None:
+    resume = _get_owned_resume(resume_id, current_user, db)
+    path = Path(resume.file_path)
+    ResumeRepository(db).delete(resume)
+    path.unlink(missing_ok=True)
+
+
 @router.post(
     "/{resume_id}/tailor",
     response_model=ResumeWorkflowResponse,
@@ -198,6 +244,7 @@ def tailor_resume_for_job(
             user_id=current_user.id,
             workflow_output_repository=WorkflowOutputRepository(db),
             output_key=f"resume-{resume.id}-{uuid4().hex}",
+            source_resume_id=resume.id,
         )
     except ResumeWorkflowError as exc:
         raise HTTPException(
@@ -212,3 +259,85 @@ def tailor_resume_for_job(
         )
 
     return ResumeWorkflowResponse.model_validate(result.to_dict())
+
+
+@router.post(
+    "/{resume_id}/save-tailored",
+    response_model=TailoredResumeResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Save an approved tailored resume as a downloadable PDF",
+)
+def save_tailored_resume(
+    resume_id: int,
+    payload: SaveTailoredResumeRequest,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> TailoredResumeResponse:
+    source_resume = _get_owned_resume(resume_id, current_user, db)
+    output = WorkflowOutputRepository(db).get_by_id_for_user(
+        payload.workflow_output_record_id,
+        current_user.id,
+    )
+    if output is None:
+        raise HTTPException(status_code=403, detail="You do not have access to this workflow output.")
+    if output.workflow_name != "resume_analysis_and_tailoring":
+        raise HTTPException(status_code=422, detail="This output is not a tailored resume.")
+    if output.payload.get("resume_id") != resume_id:
+        raise HTTPException(status_code=422, detail="The tailored output does not belong to this resume.")
+    approval = check_persisted_approval(
+        HumanFeedbackRepository(db),
+        user_id=current_user.id,
+        workflow_name=output.workflow_name,
+        workflow_output_id=output.id,
+    )
+    if output.status != "approved" or not approval.approved:
+        raise HTTPException(
+            status_code=403,
+            detail="The tailored resume must be approved before it can be saved.",
+        )
+
+    tailoring = output.payload.get("tailoring")
+    if not isinstance(tailoring, dict):
+        raise HTTPException(status_code=422, detail="Tailored resume data is invalid.")
+
+    version = source_resume.version + 1
+    filename = f"{Path(source_resume.original_filename).stem}_tailored_v{version}.pdf"
+    stored_path = RESUME_STORAGE_DIRECTORY / str(current_user.id) / f"{uuid4().hex}.pdf"
+    stored_path.parent.mkdir(parents=True, exist_ok=True)
+    resume_text = tailored_resume_to_pdf(tailoring, stored_path)
+    try:
+        saved = ResumeRepository(db).create(
+            user_id=current_user.id,
+            original_filename=filename,
+            file_path=str(stored_path),
+            extracted_text=resume_text,
+            parsed_data={
+                "source_resume_id": source_resume.id,
+                "workflow_output_id": output.id,
+                "tailored": tailoring,
+            },
+            version=version,
+        )
+    except Exception:
+        stored_path.unlink(missing_ok=True)
+        raise
+
+    response = ResumeResponse.model_validate(saved).model_dump()
+    response["download_url"] = f"/resumes/download/{saved.id}"
+    return TailoredResumeResponse.model_validate(response)
+
+
+@router.get(
+    "/download/{resume_id}",
+    summary="Download an owned resume PDF",
+)
+def download_resume(
+    resume_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    resume = _get_owned_resume(resume_id, current_user, db)
+    path = Path(resume.file_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Resume file not found.")
+    return FileResponse(path, media_type="application/pdf", filename=resume.original_filename)

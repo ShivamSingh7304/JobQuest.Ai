@@ -77,6 +77,7 @@ def run_application_workflow(
     workflow_output_id: int | None = None,
     feedback_repository: Any | None = None,
     workflow_output_repository: Any | None = None,
+    output_key: str | None = None,
 ) -> ApplicationWorkflowResult:
     """Prepare an application and stop unless persisted approval is present.
 
@@ -101,7 +102,7 @@ def run_application_workflow(
             user_id=user_id,
             workflow_name="application_preparation",
             output_type="application",
-            output_key=None,
+            output_key=output_key,
             payload={
                 "company": company,
                 "role": role,
@@ -149,7 +150,7 @@ def run_application_workflow(
 
         approval = persisted_approval
         if not approval.approved:
-            return ApplicationWorkflowResult(
+            result = ApplicationWorkflowResult(
                 company=company,
                 role=role,
                 job_id=job_id,
@@ -165,6 +166,17 @@ def run_application_workflow(
                     "Provide explicit approval before submitting anything.",
                 ),
             )
+            if workflow_output_repository is not None and user_id is not None:
+                payload = result.to_dict()
+                payload["workflow_output_id"] = result.workflow_output_id
+                update_payload = getattr(
+                    workflow_output_repository,
+                    "update_payload_for_user",
+                    None,
+                )
+                if update_payload is not None:
+                    update_payload(workflow_output_id, user_id, payload)
+            return result
 
         status_summary = _invoke_tool(
             summarize_application_status,
@@ -185,7 +197,7 @@ def run_application_workflow(
                 workflow_output_id, user_id, "approved"
             )
 
-        return ApplicationWorkflowResult(
+        result = ApplicationWorkflowResult(
             company=company,
             role=role,
             job_id=job_id,
@@ -201,6 +213,17 @@ def run_application_workflow(
             ),
             submission_allowed=True,
         )
+        if workflow_output_repository is not None and user_id is not None:
+            payload = result.to_dict()
+            payload["workflow_output_id"] = result.workflow_output_id
+            update_payload = getattr(
+                workflow_output_repository,
+                "update_payload_for_user",
+                None,
+            )
+            if update_payload is not None:
+                update_payload(workflow_output_id, user_id, payload)
+        return result
     except ApplicationWorkflowError:
         raise
     except Exception as exc:

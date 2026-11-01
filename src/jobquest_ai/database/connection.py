@@ -54,3 +54,21 @@ def create_tables():
                     "ADD COLUMN workflow_output_record_id INTEGER"
                 )
             )
+
+    application_columns = (
+        {
+            column["name"]
+            for column in inspector.get_columns("applications")
+        }
+        if "applications" in inspector.get_table_names()
+        else set()
+    )
+    if application_columns and "workflow_output_id" not in application_columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE applications "
+                    "ADD COLUMN workflow_output_id INTEGER "
+                    "REFERENCES workflow_outputs(id) ON DELETE SET NULL"
+                )
+            )
