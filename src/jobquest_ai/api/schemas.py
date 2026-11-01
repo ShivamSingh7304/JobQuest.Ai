@@ -134,11 +134,16 @@ class ResumeWorkflowResponse(BaseModel):
     workflow_output_id: int
     status: str
     target_role: str
+    resume_id: int | None = None
     analysis: dict[str, Any]
     tailoring: TailoredResume
     original_content_unchanged: bool
     human_review: dict[str, Any]
     next_steps: list[str]
+
+
+class SaveTailoredResumeRequest(BaseModel):
+    workflow_output_record_id: int = Field(..., gt=0)
 
 
 class ResumeResponse(BaseModel):
@@ -151,6 +156,10 @@ class ResumeResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class TailoredResumeResponse(ResumeResponse):
+    download_url: str
 
 
 class JobMatchRequest(BaseModel):
@@ -280,6 +289,60 @@ class ApplicationResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ApplicationPreparationResponse(BaseModel):
+    application_id: int
+    workflow: str
+    company: str
+    role: str
+    job_id: int | None
+    resume_id: int | None
+    job_description: str | None
+    workflow_output_id: int
+    status: str
+    readiness_checklist: str
+    approval: dict[str, Any]
+    next_steps: list[str]
+    submission_allowed: bool
+
+
+InterviewCategory = Literal["technical", "behavioral", "hr", "resume"]
+InterviewDifficulty = Literal["easy", "medium", "hard"]
+
+
+class InterviewGenerateRequest(BaseModel):
+    resume_id: int = Field(..., gt=0)
+    target_role: str = Field(..., min_length=1, max_length=255)
+    job_description: str = Field(..., min_length=1, max_length=15_000)
+    question_count: int = Field(default=5, ge=1, le=30)
+    categories: list[InterviewCategory] | None = None
+    difficulty: InterviewDifficulty = "medium"
+
+
+class InterviewAnswerRequest(BaseModel):
+    answer: str = Field(..., min_length=1, max_length=20_000)
+
+
+class InterviewStartResponse(BaseModel):
+    session_id: str
+    workflow_output_id: int
+    target_role: str
+    status: str
+    question: dict[str, Any]
+
+
+class InterviewTurnResponse(BaseModel):
+    session_id: str
+    evaluation: dict[str, Any]
+    next_question: dict[str, Any] | None
+    interview_completed: bool
+    answered_questions: int
+    total_questions: int
+
+
+class InterviewReportResponse(BaseModel):
+    report: dict[str, Any]
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from jobquest_ai.api.schemas import (
     ApplicationCreate,
+    ApplicationPreparationResponse,
     ApplicationResponse,
     ApplicationStatus,
     ApplicationUpdate,
@@ -25,6 +26,10 @@ from jobquest_ai.database.repositories.workflow_output_repository import (
     WorkflowOutputRepository,
 )
 from jobquest_ai.human_review.approval import check_persisted_approval
+from jobquest_ai.workflows.application_workflow import (
+    ApplicationWorkflowError,
+    run_application_workflow,
+)
 
 router = APIRouter(prefix="/applications", tags=["Applications"])
 
@@ -192,6 +197,68 @@ def list_applications(
         limit=limit,
     )
     return [ApplicationResponse.model_validate(item) for item in applications]
+
+
+@router.post(
+    "/{application_id}/prepare",
+    response_model=ApplicationPreparationResponse,
+    summary="Prepare an application for human review",
+)
+def prepare_application_for_review(
+    application_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> ApplicationPreparationResponse:
+    application = _get_owned_application(application_id, current_user, db)
+    job = JobRepository(db).get_by_id(application.job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found.",
+        )
+
+    if application.resume_id is not None:
+        resume = ResumeRepository(db).get_by_id(application.resume_id)
+        if resume is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Resume not found.",
+            )
+        if resume.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have access to this resume.",
+            )
+
+    try:
+        result = run_application_workflow(
+            company=job.company,
+            role=job.title,
+            resume_ready=application.resume_id is not None,
+            job_id=application.job_id,
+            resume_id=application.resume_id,
+            job_description=job.description,
+            user_id=current_user.id,
+            workflow_output_id=application.workflow_output_id,
+            feedback_repository=HumanFeedbackRepository(db),
+            workflow_output_repository=WorkflowOutputRepository(db),
+            output_key=f"application-{application.id}",
+        )
+    except ApplicationWorkflowError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Application preparation failed: {exc}",
+        ) from exc
+
+    next_status = "approved" if result.submission_allowed else "pending_approval"
+    updated = ApplicationRepository(db).update_status(
+        application,
+        status=next_status,
+        workflow_output_id=result.workflow_output_id,
+    )
+    response = result.to_dict()
+    response["application_id"] = updated.id
+    return ApplicationPreparationResponse.model_validate(response)
 
 
 @router.patch(
