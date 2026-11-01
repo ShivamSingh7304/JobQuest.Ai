@@ -12,6 +12,8 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+ui/node_modules/
+ui/dist/
 
 # Virtual environments
 .venv/

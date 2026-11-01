@@ -9,6 +9,7 @@ from jobquest_ai.api.routes.auth import router as auth_router
 from jobquest_ai.api.routes.applications import router as applications_router
 from jobquest_ai.api.routes.chat import router as chat_router
 from jobquest_ai.api.routes.feedback import router as feedback_router
+from jobquest_ai.api.routes.workflow_outputs import router as workflow_outputs_router
 from jobquest_ai.api.routes.jobs import router as jobs_router
 from jobquest_ai.api.routes.resumes import router as resumes_router
 from jobquest_ai.database.connection import create_tables
@@ -19,6 +20,7 @@ app.include_router(auth_router)
 app.include_router(applications_router)
 app.include_router(chat_router)
 app.include_router(feedback_router)
+app.include_router(workflow_outputs_router)
 app.include_router(jobs_router)
 app.include_router(resumes_router)
 
@@ -39,5 +41,4 @@ def main() -> None:
     uvicorn.run("jobquest_ai.main:app", host="0.0.0.0", port=8000, reload=False)
 
 if __name__ == "__main__":
-    main()
     main()

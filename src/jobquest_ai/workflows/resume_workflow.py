@@ -19,6 +19,7 @@ class ResumeWorkflowResult:
     target_role: str
     analysis: dict[str, Any]
     tailoring: TailoredResume
+    workflow_output_id: int | None = None
     status: str = "awaiting_review"
     original_content_unchanged: bool = True
     next_steps: tuple[str, ...] = (
@@ -33,6 +34,7 @@ class ResumeWorkflowResult:
             "workflow": "resume_analysis_and_tailoring",
             "status": self.status,
             "target_role": self.target_role,
+            "workflow_output_id": self.workflow_output_id,
             "analysis": self.analysis,
             "tailoring": self.tailoring.model_dump(),
             "original_content_unchanged": self.original_content_unchanged,
@@ -67,6 +69,9 @@ def run_resume_workflow(
     target_role: str,
     *,
     file_path: str | None = None,
+    user_id: int | None = None,
+    workflow_output_repository: Any | None = None,
+    output_key: str | None = None,
 ) -> ResumeWorkflowResult:
     """Analyze resume content and produce role-specific, reviewable guidance.
 
@@ -105,11 +110,41 @@ def run_resume_workflow(
     except Exception as exc:
         raise ResumeWorkflowError(f"Resume workflow failed: {exc}") from exc
 
-    return ResumeWorkflowResult(
+    result = ResumeWorkflowResult(
         target_role=role,
         analysis=analysis,
         tailoring=tailored,
     )
+    if user_id is not None or workflow_output_repository is not None:
+        if user_id is None or workflow_output_repository is None:
+            raise ResumeWorkflowError(
+                "user_id and workflow_output_repository are required together."
+            )
+        output = workflow_output_repository.create(
+            user_id=user_id,
+            workflow_name="resume_analysis_and_tailoring",
+            output_type="resume",
+            output_key=output_key,
+            payload=result.to_dict(),
+            status="pending_review",
+        )
+        persisted_payload = result.to_dict()
+        persisted_payload["workflow_output_id"] = output.id
+        workflow_output_repository.update_payload_for_user(
+            output.id,
+            user_id,
+            persisted_payload,
+        )
+        result = ResumeWorkflowResult(
+            target_role=result.target_role,
+            analysis=result.analysis,
+            tailoring=result.tailoring,
+            workflow_output_id=output.id,
+            status=result.status,
+            original_content_unchanged=result.original_content_unchanged,
+            next_steps=result.next_steps,
+        )
+    return result
 
 
 __all__ = ["ResumeWorkflowError", "ResumeWorkflowResult", "run_resume_workflow"]

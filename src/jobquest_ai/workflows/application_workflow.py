@@ -6,7 +6,7 @@ from typing import Any, Callable
 from jobquest_ai.human_review.approval import (
     ApprovalResult,
     ReviewDecision,
-    check_approval,
+    check_persisted_approval,
 )
 from jobquest_ai.tools.application_tools import (
     prepare_application,
@@ -27,6 +27,7 @@ class ApplicationWorkflowResult:
     job_id: int | None
     resume_id: int | None
     job_description: str | None
+    workflow_output_id: int | None
     status: str
     readiness_checklist: str
     approval: ApprovalResult
@@ -41,6 +42,7 @@ class ApplicationWorkflowResult:
             "job_id": self.job_id,
             "resume_id": self.resume_id,
             "job_description": self.job_description,
+            "workflow_output_id": self.workflow_output_id,
             "status": self.status,
             "readiness_checklist": self.readiness_checklist,
             "approval": {
@@ -71,13 +73,19 @@ def run_application_workflow(
     approved: bool = False,
     review_decision: ReviewDecision | None = None,
     review_feedback: str | None = None,
+    user_id: int | None = None,
+    workflow_output_id: int | None = None,
+    feedback_repository: Any | None = None,
+    workflow_output_repository: Any | None = None,
 ) -> ApplicationWorkflowResult:
-    """Prepare an application and stop unless explicit approval is present.
+    """Prepare an application and stop unless persisted approval is present.
 
     ``job_id`` and ``resume_id`` are retained as context for callers and
     validation layers. This workflow does not submit an application; even an
     approved result only tells the caller that a later submission action is
-    allowed.
+    allowed. ``approved``, ``review_decision``, and ``review_feedback`` are
+    retained for compatibility in the result context but cannot bypass the
+    persisted approval check.
     """
 
     if not isinstance(company, str) or not company.strip():
@@ -88,6 +96,43 @@ def run_application_workflow(
         raise ValueError("job_id must be a positive integer when provided.")
     if resume_id is not None and (not isinstance(resume_id, int) or resume_id <= 0):
         raise ValueError("resume_id must be a positive integer when provided.")
+    if user_id is not None and workflow_output_repository is not None and workflow_output_id is None:
+        output = workflow_output_repository.create(
+            user_id=user_id,
+            workflow_name="application_preparation",
+            output_type="application",
+            output_key=None,
+            payload={
+                "company": company,
+                "role": role,
+                "job_id": job_id,
+                "resume_id": resume_id,
+                "job_description": job_description,
+            },
+            status="pending_review",
+        )
+        workflow_output_id = output.id
+
+    if (
+        user_id is None
+        or workflow_output_id is None
+        or feedback_repository is None
+    ):
+        persisted_approval = ApprovalResult(
+            approved=False,
+            state="pending",
+            message=(
+                "Persisted approval context is required: provide user_id, "
+                "workflow_output_id, and feedback_repository."
+            ),
+        )
+    else:
+        persisted_approval = check_persisted_approval(
+            feedback_repository,
+            user_id=user_id,
+            workflow_name="application_preparation",
+            workflow_output_id=workflow_output_id,
+        )
 
     company = company.strip()
     role = role.strip()
@@ -102,11 +147,7 @@ def run_application_workflow(
                 "Application preparation returned an invalid checklist."
             )
 
-        approval = check_approval(
-            approved,
-            decision=review_decision,
-            feedback=review_feedback,
-        )
+        approval = persisted_approval
         if not approval.approved:
             return ApplicationWorkflowResult(
                 company=company,
@@ -114,6 +155,7 @@ def run_application_workflow(
                 job_id=job_id,
                 resume_id=resume_id,
                 job_description=job_description,
+                workflow_output_id=workflow_output_id,
                 status="pending_approval",
                 readiness_checklist=checklist,
                 approval=approval,
@@ -138,12 +180,18 @@ def run_application_workflow(
                 "Application status summarization returned an invalid result."
             )
 
+        if workflow_output_repository is not None and user_id is not None:
+            workflow_output_repository.update_status_for_user(
+                workflow_output_id, user_id, "approved"
+            )
+
         return ApplicationWorkflowResult(
             company=company,
             role=role,
             job_id=job_id,
             resume_id=resume_id,
             job_description=job_description,
+            workflow_output_id=workflow_output_id,
             status="approved_for_submission",
             readiness_checklist=checklist,
             approval=approval,

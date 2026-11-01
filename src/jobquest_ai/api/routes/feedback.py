@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from jobquest_ai.api.schemas import (
+    ApprovalCheckResponse,
     HumanFeedbackCreate,
     HumanFeedbackResponse,
     HumanFeedbackUpdate,
@@ -16,6 +17,10 @@ from jobquest_ai.database.models.user import User
 from jobquest_ai.database.repositories.human_feedback_repository import (
     HumanFeedbackRepository,
 )
+from jobquest_ai.database.repositories.workflow_output_repository import (
+    WorkflowOutputRepository,
+)
+from jobquest_ai.human_review.approval import check_persisted_approval
 
 router = APIRouter(prefix="/feedback", tags=["Human feedback"])
 
@@ -44,6 +49,19 @@ def _get_owned_feedback(
     return item
 
 
+def _sync_workflow_output_status(item, db: Session) -> None:
+    if item.workflow_output_record_id is None:
+        return
+    output_status = (
+        "approved" if item.decision == "approve" else "changes_requested"
+    )
+    WorkflowOutputRepository(db).update_status_for_user(
+        item.workflow_output_record_id,
+        item.user_id,
+        output_status,
+    )
+
+
 @router.post(
     "",
     response_model=HumanFeedbackResponse,
@@ -64,6 +82,7 @@ def create_feedback(
             message_id=payload.message_id,
             workflow_name=payload.workflow_name,
             workflow_output_id=payload.workflow_output_id,
+            workflow_output_record_id=payload.workflow_output_record_id,
         )
     except LookupError as exc:
         raise HTTPException(
@@ -80,7 +99,34 @@ def create_feedback(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    _sync_workflow_output_status(item, db)
     return _response(item)
+
+
+@router.get(
+    "/approval",
+    response_model=ApprovalCheckResponse,
+    summary="Check persisted approval for a workflow output",
+)
+def check_workflow_approval(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    workflow_name: str = Query(..., min_length=1, max_length=100),
+    workflow_output_id: str = Query(..., min_length=1, max_length=255),
+) -> ApprovalCheckResponse:
+    result = check_persisted_approval(
+        HumanFeedbackRepository(db),
+        user_id=current_user.id,
+        workflow_name=workflow_name,
+        workflow_output_id=workflow_output_id,
+    )
+    return ApprovalCheckResponse(
+        approved=result.approved,
+        state=result.state,
+        message=result.message,
+        decision=result.decision,
+        feedback=result.feedback,
+    )
 
 
 @router.get(
@@ -138,4 +184,5 @@ def update_feedback(
         decision=payload.decision,
         feedback=payload.feedback.strip() if payload.feedback else None,
     )
+    _sync_workflow_output_status(updated, db)
     return _response(updated)

@@ -1,7 +1,7 @@
 """Human approval primitives for irreversible JobQuest.Ai actions."""
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 
 ReviewDecision = Literal["approve", "request_changes"]
@@ -76,10 +76,53 @@ def check_approval(
     )
 
 
+def check_persisted_approval(
+    repository: Any,
+    *,
+    user_id: int,
+    workflow_name: str,
+    workflow_output_id: str | int,
+) -> ApprovalResult:
+    """Check the latest persisted review for an exact user/output pair."""
+
+    if not isinstance(user_id, int) or user_id <= 0:
+        raise ValueError("user_id must be a positive integer.")
+    if not isinstance(workflow_name, str) or not workflow_name.strip():
+        raise ValueError("workflow_name cannot be empty.")
+    if not isinstance(workflow_output_id, (str, int)) or (
+        isinstance(workflow_output_id, str) and not workflow_output_id.strip()
+    ):
+        raise ValueError("workflow_output_id cannot be empty.")
+    if repository is None or not hasattr(repository, "get_latest_decision_for_output"):
+        raise ValueError("A feedback repository is required for persisted approval.")
+
+    feedback = repository.get_latest_decision_for_output(
+        user_id=user_id,
+        workflow_name=workflow_name.strip(),
+        workflow_output_id=(
+            workflow_output_id.strip()
+            if isinstance(workflow_output_id, str)
+            else workflow_output_id
+        ),
+    )
+    if feedback is None:
+        return ApprovalResult(
+            approved=False,
+            state="pending",
+            message=(
+                "No persisted approval exists for this user and workflow output. "
+                "The application action remains blocked."
+            ),
+        )
+
+    return validate_review(feedback.decision, feedback.feedback)
+
+
 __all__ = [
     "ApprovalResult",
     "ApprovalState",
     "ReviewDecision",
     "check_approval",
+    "check_persisted_approval",
     "validate_review",
 ]
