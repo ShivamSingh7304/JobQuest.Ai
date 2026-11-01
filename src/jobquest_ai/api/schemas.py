@@ -254,11 +254,13 @@ class ApplicationCreate(BaseModel):
     resume_id: int | None = Field(default=None, gt=0)
     status: ApplicationStatus = "saved"
     notes: str | None = Field(default=None, max_length=32_000)
+    workflow_output_record_id: int | None = Field(default=None, gt=0)
 
 
 class ApplicationUpdate(BaseModel):
     status: ApplicationStatus | None = None
     notes: str | None = Field(default=None, max_length=32_000)
+    workflow_output_record_id: int | None = Field(default=None, gt=0)
 
 
 class ApplicationResponse(BaseModel):
@@ -266,6 +268,11 @@ class ApplicationResponse(BaseModel):
     user_id: int
     job_id: int
     resume_id: int | None
+    workflow_output_record_id: int | None = Field(
+        default=None,
+        validation_alias="workflow_output_id",
+        serialization_alias="workflow_output_record_id",
+    )
     status: ApplicationStatus
     applied_at: datetime | None
     notes: str | None

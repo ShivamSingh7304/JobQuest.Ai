@@ -18,6 +18,13 @@ from jobquest_ai.database.repositories.application_repository import (
 )
 from jobquest_ai.database.repositories.job_repository import JobRepository
 from jobquest_ai.database.repositories.resume_repository import ResumeRepository
+from jobquest_ai.database.repositories.human_feedback_repository import (
+    HumanFeedbackRepository,
+)
+from jobquest_ai.database.repositories.workflow_output_repository import (
+    WorkflowOutputRepository,
+)
+from jobquest_ai.human_review.approval import check_persisted_approval
 
 router = APIRouter(prefix="/applications", tags=["Applications"])
 
@@ -68,6 +75,52 @@ def _validate_references(
         )
 
 
+def _get_approved_application_output(
+    workflow_output_id: int | None,
+    current_user: User,
+    db: Session,
+):
+    if workflow_output_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Application approval is required before approving or submitting "
+                "an application."
+            ),
+        )
+
+    output = WorkflowOutputRepository(db).get_by_id_for_user(
+        workflow_output_id,
+        current_user.id,
+    )
+    if output is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to the workflow output.",
+        )
+    if output.workflow_name != "application_preparation":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="The workflow output is not an application preparation output.",
+        )
+
+    approval = check_persisted_approval(
+        HumanFeedbackRepository(db),
+        user_id=current_user.id,
+        workflow_name=output.workflow_name,
+        workflow_output_id=output.id,
+    )
+    if output.status != "approved" or not approval.approved:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Application submission requires an approved application "
+                "workflow output."
+            ),
+        )
+    return output
+
+
 @router.post(
     "",
     response_model=ApplicationResponse,
@@ -80,12 +133,39 @@ def create_application(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ApplicationResponse:
     _validate_references(payload, current_user, db)
+    workflow_output_id = None
+    if payload.workflow_output_record_id is not None:
+        if payload.status in {"approved", "submitted"}:
+            workflow_output = _get_approved_application_output(
+                payload.workflow_output_record_id,
+                current_user,
+                db,
+            )
+        else:
+            workflow_output = WorkflowOutputRepository(db).get_by_id_for_user(
+                payload.workflow_output_record_id,
+                current_user.id,
+            )
+            if workflow_output is None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You do not have access to the workflow output.",
+                )
+            if workflow_output.workflow_name != "application_preparation":
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="The workflow output is not an application preparation output.",
+                )
+        workflow_output_id = workflow_output.id
+    elif payload.status in {"approved", "submitted"}:
+        _get_approved_application_output(None, current_user, db)
     application = ApplicationRepository(db).create(
         user_id=current_user.id,
         job_id=payload.job_id,
         resume_id=payload.resume_id,
         status=payload.status,
         notes=payload.notes,
+        workflow_output_id=workflow_output_id,
     )
     return ApplicationResponse.model_validate(application)
 
@@ -127,10 +207,19 @@ def update_application(
 ) -> ApplicationResponse:
     application = _get_owned_application(application_id, current_user, db)
     next_status = payload.status or application.status
+    workflow_output_id = payload.workflow_output_record_id or application.workflow_output_id
+    if next_status in {"approved", "submitted"}:
+        workflow_output = _get_approved_application_output(
+            workflow_output_id,
+            current_user,
+            db,
+        )
+        workflow_output_id = workflow_output.id
     updated = ApplicationRepository(db).update_status(
         application,
         status=next_status,
         notes=payload.notes,
+        workflow_output_id=workflow_output_id,
     )
     return ApplicationResponse.model_validate(updated)
 
