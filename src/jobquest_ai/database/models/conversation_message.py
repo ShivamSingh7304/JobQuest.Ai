@@ -35,3 +35,9 @@ class ConversationMessage(Base):
         back_populates="messages"
     )
 
+    human_feedback: Mapped[list["HumanFeedback"]] = relationship(
+        "HumanFeedback",
+        back_populates="message",
+        cascade="all, delete-orphan",
+    )
+

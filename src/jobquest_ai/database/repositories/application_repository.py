@@ -48,6 +48,7 @@ class ApplicationRepository:
         application: Application,
         status: str,
         notes: str | None = None,
+        workflow_output_id: int | None = None,
     ) -> Application:
         allowed = {
             "saved", "pending_approval", "approved", "submitted",
@@ -59,6 +60,8 @@ class ApplicationRepository:
         application.status = status
         if notes is not None:
             application.notes = notes
+        if workflow_output_id is not None:
+            application.workflow_output_id = workflow_output_id
 
         if status == "submitted" and application.applied_at is None:
             application.applied_at = datetime.now(timezone.utc)
