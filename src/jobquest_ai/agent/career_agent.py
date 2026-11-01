@@ -8,6 +8,7 @@ from jobquest_ai.database.models.user import User
 from jobquest_ai.memory.memory_extractor import MemoryExtractionError
 from jobquest_ai.memory.memory_manager import MemoryManager
 from jobquest_ai.memory.user_md_manager import format_user_context
+from jobquest_ai.tools.calendar_tools import reset_calendar_context, set_calendar_context
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +24,12 @@ class CareerAgent:
         memory_manager: MemoryManager | None = None,
         *,
         tool_router: ToolRouter | None = None,
+        db: Any | None = None,
     ):
         self._agent_factory = agent_factory
         self._memory_manager = memory_manager
         self._tool_router = tool_router or ToolRouter()
+        self._db = db
 
     def respond(self, user: User, message: str) -> str:
         if not isinstance(message, str) or not message.strip():
@@ -69,6 +72,7 @@ class CareerAgent:
             HumanMessage(content=message.strip()),
         ]
 
+        calendar_context = set_calendar_context(self._db, user.id) if self._db is not None else None
         try:
             result = agent.invoke(
                 {"messages": messages},
@@ -88,6 +92,9 @@ class CareerAgent:
             raise CareerAgentError(
                 "The career assistant could not complete this request."
             ) from exc
+        finally:
+            if calendar_context is not None:
+                reset_calendar_context(calendar_context)
 
         if not isinstance(result, dict):
             raise CareerAgentError(
