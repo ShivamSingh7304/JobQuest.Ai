@@ -5,11 +5,18 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
-from jobquest_ai.api.schemas import ResumeResponse, ResumeTailorRequest
+from jobquest_ai.api.schemas import (
+    ResumeResponse,
+    ResumeTailorRequest,
+    ResumeWorkflowResponse,
+)
 from jobquest_ai.auth.dependencies import get_current_user
 from jobquest_ai.database.connection import get_db
 from jobquest_ai.database.models.user import User
 from jobquest_ai.database.repositories.resume_repository import ResumeRepository
+from jobquest_ai.database.repositories.workflow_output_repository import (
+    WorkflowOutputRepository,
+)
 from jobquest_ai.resume.resume_analyzer import (
     ResumeAnalysisError,
     analyze_resume,
@@ -20,10 +27,9 @@ from jobquest_ai.resume.resume_parser import (
     ResumeParsingError,
     parse_resume,
 )
-from jobquest_ai.resume.resume_tailor import (
-    ResumeTailoringError,
-    TailoredResume,
-    tailor_resume,
+from jobquest_ai.workflows.resume_workflow import (
+    ResumeWorkflowError,
+    run_resume_workflow,
 )
 
 router = APIRouter(prefix="/resumes", tags=["Resumes"])
@@ -155,15 +161,15 @@ def get_resume(
 
 @router.post(
     "/{resume_id}/tailor",
-    response_model=TailoredResume,
-    summary="Tailor a resume to a target job description",
+    response_model=ResumeWorkflowResponse,
+    summary="Analyze and tailor a resume for a target job description",
 )
 def tailor_resume_for_job(
     resume_id: int,
     payload: ResumeTailorRequest,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> TailoredResume:
+) -> ResumeWorkflowResponse:
     resume = _get_owned_resume(resume_id, current_user, db)
 
     if not payload.job_description.strip():
@@ -186,12 +192,23 @@ def tailor_resume_for_job(
         )
 
     try:
-        return tailor_resume(
-            resume=resume_text,
-            job_description=payload.job_description,
+        result = run_resume_workflow(
+            resume_content=resume_text,
+            target_role=payload.job_description,
+            user_id=current_user.id,
+            workflow_output_repository=WorkflowOutputRepository(db),
+            output_key=f"resume-{resume.id}-{uuid4().hex}",
         )
-    except ResumeTailoringError as exc:
+    except ResumeWorkflowError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Resume tailoring failed: {exc}",
+            detail=f"Resume workflow failed: {exc}",
         ) from exc
+
+    if result.workflow_output_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Resume workflow did not produce a persisted output.",
+        )
+
+    return ResumeWorkflowResponse.model_validate(result.to_dict())

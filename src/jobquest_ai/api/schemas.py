@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
+
+from jobquest_ai.resume.resume_tailor import TailoredResume
 
 
 # ---------------------------------------------------------------------------
@@ -16,6 +18,106 @@ class ChatResponse(BaseModel):
     response: str
 
 
+ReviewDecision = Literal["approve", "request_changes"]
+
+
+class HumanFeedbackCreate(BaseModel):
+    decision: ReviewDecision
+    feedback: str | None = Field(default=None, max_length=32_000)
+    conversation_id: int | None = Field(default=None, gt=0)
+    message_id: int | None = Field(default=None, gt=0)
+    workflow_name: str | None = Field(default=None, min_length=1, max_length=100)
+    workflow_output_id: str | None = Field(
+        default=None, min_length=1, max_length=255
+    )
+    workflow_output_record_id: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_target(self):
+        conversation_target = (
+            self.conversation_id is not None or self.message_id is not None
+        )
+        workflow_target = (
+            self.workflow_name is not None
+            or self.workflow_output_id is not None
+            or self.workflow_output_record_id is not None
+        )
+        if conversation_target == workflow_target:
+            raise ValueError(
+                "Provide either a conversation/message target or a workflow output target."
+            )
+        if workflow_target and self.workflow_output_record_id is None and not (
+            self.workflow_name and self.workflow_output_id
+        ):
+            raise ValueError(
+                "workflow_name and workflow_output_id are required together unless workflow_output_record_id is provided."
+            )
+        return self
+
+
+class HumanFeedbackUpdate(BaseModel):
+    decision: ReviewDecision
+    feedback: str | None = Field(default=None, max_length=32_000)
+
+
+class HumanFeedbackResponse(BaseModel):
+    id: int
+    user_id: int
+    decision: ReviewDecision
+    feedback: str | None
+    conversation_id: int | None
+    message_id: int | None
+    workflow_name: str | None
+    workflow_output_id: str | None
+    workflow_output_record_id: int | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ApprovalCheckResponse(BaseModel):
+    approved: bool
+    state: Literal["approved", "pending", "changes_requested"]
+    message: str
+    decision: ReviewDecision | None = None
+    feedback: str | None = None
+
+
+class WorkflowOutputCreate(BaseModel):
+    workflow_name: str = Field(..., min_length=1, max_length=100)
+    output_type: str = Field(..., min_length=1, max_length=50)
+    output_key: str | None = Field(default=None, max_length=255)
+    payload: dict[str, Any]
+    status: Literal[
+        "pending_review", "changes_requested", "approved", "superseded"
+    ] = "pending_review"
+    parent_output_id: int | None = Field(default=None, gt=0)
+
+
+class WorkflowOutputRevisionCreate(BaseModel):
+    payload: dict[str, Any]
+    status: Literal[
+        "pending_review", "changes_requested", "approved", "superseded"
+    ] = "pending_review"
+
+
+class WorkflowOutputResponse(BaseModel):
+    id: int
+    user_id: int
+    workflow_name: str
+    output_type: str
+    output_key: str | None
+    payload: dict[str, Any]
+    status: str
+    version: int
+    parent_output_id: int | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class ResumeTailorRequest(BaseModel):
     job_description: str = Field(
         ...,
@@ -23,6 +125,20 @@ class ResumeTailorRequest(BaseModel):
         max_length=15_000,
         description="The target job description.",
     )
+
+
+class ResumeWorkflowResponse(BaseModel):
+    """Persisted, reviewable result from resume analysis and tailoring."""
+
+    workflow: str
+    workflow_output_id: int
+    status: str
+    target_role: str
+    analysis: dict[str, Any]
+    tailoring: TailoredResume
+    original_content_unchanged: bool
+    human_review: dict[str, Any]
+    next_steps: list[str]
 
 
 class ResumeResponse(BaseModel):

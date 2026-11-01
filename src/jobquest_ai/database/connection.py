@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 load_dotenv(Path(__file__).resolve().parents[3] / ".env")
@@ -38,3 +38,19 @@ def create_tables():
     import jobquest_ai.database.models  # Register all models
 
     Base.metadata.create_all(bind=engine)
+
+    # ``create_all`` does not alter an existing table. Keep local SQLite
+    # databases created before workflow-output persistence compatible without
+    # deleting feedback or requiring a destructive reset.
+    inspector = inspect(engine)
+    feedback_columns = {
+        column["name"] for column in inspector.get_columns("human_feedback")
+    } if "human_feedback" in inspector.get_table_names() else set()
+    if feedback_columns and "workflow_output_record_id" not in feedback_columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE human_feedback "
+                    "ADD COLUMN workflow_output_record_id INTEGER"
+                )
+            )
