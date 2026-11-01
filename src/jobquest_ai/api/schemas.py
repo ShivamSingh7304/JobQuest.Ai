@@ -307,6 +307,49 @@ class ApplicationPreparationResponse(BaseModel):
     submission_allowed: bool
 
 
+class OverviewApplication(BaseModel):
+    id: int
+    role: str
+    company: str
+    stage: str
+    status: str
+    updated_at: datetime
+
+
+class OverviewResponse(BaseModel):
+    active_applications: int
+    interviewing_applications: int
+    saved_opportunities: int
+    resume_count: int
+    recent_applications: list[OverviewApplication]
+
+
+class CalendarConnectionResponse(BaseModel):
+    connected: bool
+    authorization_url: str | None = None
+
+
+class CalendarEventResponse(BaseModel):
+    id: str
+    title: str
+    start: str
+    end: str
+    date_label: str
+    time_label: str
+    location: str | None = None
+    description: str | None = None
+    link: str | None = None
+    conference_url: str | None = None
+    all_day: bool = False
+
+
+class CalendarEventsResponse(BaseModel):
+    connected: bool
+    time_zone: str
+    calendar_name: str | None = None
+    events: list[CalendarEventResponse]
+
+
 InterviewCategory = Literal["technical", "behavioral", "hr", "resume"]
 InterviewDifficulty = Literal["easy", "medium", "hard"]
 

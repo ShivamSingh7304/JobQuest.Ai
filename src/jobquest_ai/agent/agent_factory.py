@@ -84,6 +84,7 @@ def build_agent(
                 ToolRoute("application", "career_coach.md")
             ),
             *ToolRouter().get_tools(ToolRoute("retrieval", "career_coach.md")),
+            *ToolRouter().get_tools(ToolRoute("calendar", "career_coach.md")),
         ]
     )
     builder = agent_builder or create_agent
@@ -163,4 +164,5 @@ def create_career_agent(
     return CareerAgent(
         agent_factory=factory,
         memory_manager=MemoryManager(db) if db is not None else None,
+        db=db,
     )

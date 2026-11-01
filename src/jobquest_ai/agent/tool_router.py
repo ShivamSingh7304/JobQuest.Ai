@@ -5,6 +5,7 @@ from typing import Literal
 from langchain_core.tools import BaseTool
 
 from jobquest_ai.tools.application_tools import TOOLS as APPLICATION_TOOLS
+from jobquest_ai.tools.calendar_tools import TOOLS as CALENDAR_TOOLS
 from jobquest_ai.tools.interview_tools import TOOLS as INTERVIEW_TOOLS
 from jobquest_ai.tools.job_tools import TOOLS as JOB_TOOLS
 from jobquest_ai.tools.resume_tools import TOOLS as RESUME_TOOLS
@@ -17,6 +18,7 @@ RouteCategory = Literal[
     "interview",
     "application",
     "retrieval",
+    "calendar",
 ]
 
 
@@ -30,6 +32,11 @@ class ToolRouter:
     """Select only the tools and task prompt relevant to a user request."""
 
     _ROUTES: tuple[tuple[RouteCategory, re.Pattern[str], str], ...] = (
+        (
+            "calendar",
+            re.compile(r"\b(calendar|schedule|scheduling|event|meeting|appointment)\b", re.IGNORECASE),
+            "career_coach.md",
+        ),
         (
             "application",
             re.compile(
@@ -79,6 +86,7 @@ class ToolRouter:
             "interview": INTERVIEW_TOOLS,
             "application": APPLICATION_TOOLS,
             "retrieval": RETRIEVAL_TOOLS,
+            "calendar": CALENDAR_TOOLS,
         }
 
     def route(self, message: str) -> ToolRoute:
