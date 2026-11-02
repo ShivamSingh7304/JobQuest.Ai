@@ -142,7 +142,7 @@ def _build_analyzer():
         llm = ChatGroq(
             model=os.getenv(
                 "GROQ_MODEL",
-                "llama-3.3-70b-versatile",
+                "openai/gpt-oss-120b",
             ),
             temperature=0,
             api_key=api_key,
