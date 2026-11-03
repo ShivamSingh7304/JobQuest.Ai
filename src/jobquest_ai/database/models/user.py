@@ -60,3 +60,15 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+
+    human_feedback: Mapped[list["HumanFeedback"]] = relationship(
+        "HumanFeedback",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    workflow_outputs: Mapped[list["WorkflowOutput"]] = relationship(
+        "WorkflowOutput",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )

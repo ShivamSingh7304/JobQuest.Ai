@@ -43,6 +43,11 @@ class Application(Base):
         nullable=True,
         index=True,
     )
+    workflow_output_id: Mapped[int | None] = mapped_column(
+        ForeignKey("workflow_outputs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     status: Mapped[str] = mapped_column(
         default="saved", nullable=False
@@ -69,3 +74,4 @@ class Application(Base):
     resume: Mapped["Resume | None"] = relationship(
         back_populates="applications"
     )
+    workflow_output = relationship("WorkflowOutput")

@@ -2,12 +2,22 @@ from jobquest_ai.database.models.user import User
 from jobquest_ai.database.models.job import Job
 from jobquest_ai.database.models.resume import Resume
 from jobquest_ai.database.models.application import Application
+from jobquest_ai.database.models.calendar_connection import CalendarConnection
 from jobquest_ai.database.models.conversation import Conversation
+from jobquest_ai.database.models.conversation_message import ConversationMessage
+from jobquest_ai.database.models.user_memory import UserMemory
+from jobquest_ai.database.models.human_feedback import HumanFeedback
+from jobquest_ai.database.models.workflow_output import WorkflowOutput
 
 __all__ = [
     "User",
     "Job",
     "Resume",
     "Application",
+    "CalendarConnection",
     "Conversation",
+    "ConversationMessage",
+    "UserMemory",
+    "HumanFeedback",
+    "WorkflowOutput",
 ]

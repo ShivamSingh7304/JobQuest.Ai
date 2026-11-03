@@ -14,8 +14,8 @@ load_dotenv()
 QuestionCategory = Literal[
     "technical",
     "behavioral",
-    "hr",
-    "resume",
+    "hr",      
+    "resume",        
 ]
 
 QuestionDifficulty = Literal[

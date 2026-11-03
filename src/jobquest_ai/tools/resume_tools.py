@@ -1,36 +1,42 @@
-"""Resume analysis and tailoring tools."""
+"""Tools for resume processing in JobQuest.Ai."""
+
+from pathlib import Path
+from typing import Any
 
 from langchain_core.tools import tool
 
-
-@tool
-def analyze_resume(
-    resume_text: str,
-    target_role: str,
-) -> str:
-    """Create a resume review checklist for a target role."""
-
-    return (
-        f"Resume review for {target_role}\n"
-        f"Resume length: {len(resume_text)} characters\n"
-        "Review role-specific skills, measurable achievements, clear "
-        "formatting, and relevant keywords."
-    )
+from jobquest_ai.resume.resume_analyzer import analyze_resume
+from jobquest_ai.resume.resume_parser import parse_resume
 
 
 @tool
-def tailor_resume_section(
-    section_text: str,
-    target_role: str,
-) -> str:
-    """Suggest how to tailor a resume section to a target role."""
+def analyze_uploaded_resume(file_path: str) -> dict[str, Any]:
+    """Parse and analyze an uploaded resume."""
+    path = Path(file_path)
 
-    return (
-        f"Resume section tailoring for {target_role}\n"
-        f"Current section:\n{section_text}\n"
-        "Emphasize relevant accomplishments and skills using concise, "
-        "evidence-based wording. Keep all claims accurate."
-    )
+    if not path.is_file():
+        raise FileNotFoundError(f"Resume file not found: {file_path}")
+
+    parsed_resume = parse_resume(str(path))
+
+    if isinstance(parsed_resume, dict):
+        resume_text = parsed_resume.get("text", "")
+    elif isinstance(parsed_resume, str):
+        resume_text = parsed_resume
+        parsed_resume = {"text": resume_text}
+    else:
+        raise ValueError("Resume parser returned an invalid result.")
+
+    if not isinstance(resume_text, str) or not resume_text.strip():
+        raise ValueError("No readable text was extracted from the resume.")
+
+    analysis = analyze_resume(parsed_resume)
+
+    return {
+        "success": True,
+        "file_name": path.name,
+        "analysis": analysis.model_dump(),
+    }
 
 
-TOOLS = [analyze_resume, tailor_resume_section]
+TOOLS = [analyze_uploaded_resume]

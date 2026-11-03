@@ -31,3 +31,15 @@ class Conversation(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="conversations")
+    messages: Mapped[list["ConversationMessage"]] = relationship(  # noqa: F821
+        "ConversationMessage",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="ConversationMessage.position",
+    )
+
+    human_feedback: Mapped[list["HumanFeedback"]] = relationship(
+        "HumanFeedback",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+    )
