@@ -1,3 +1,7 @@
+import json
+import json
+import logging
+import re
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -24,8 +28,49 @@ from jobquest_ai.database.repositories.conversation_message_repository import (
 from jobquest_ai.database.repositories.conversation_repository import (
     ConversationRepository,
 )
+from jobquest_ai.tools.job_tools import (
+    rank_saved_jobs,
+    reset_job_context,
+    set_job_context,
+)
 
 router = APIRouter(tags=["Chat"])
+logger = logging.getLogger(__name__)
+
+_SAVED_JOB_QUERY = re.compile(
+    r"\b(saved jobs?|saved opportunities|which .*job.*fit|most fit)\b",
+    re.IGNORECASE,
+)
+
+
+def _saved_job_response(db: Session, user_id: int) -> str:
+    token = set_job_context(db, user_id)
+    try:
+        result = json.loads(rank_saved_jobs.invoke({}))
+    finally:
+        reset_job_context(token)
+
+    jobs = result.get("jobs", [])
+    if not jobs:
+        return "You do not have any saved jobs to compare yet. Save a job from Job Discovery first."
+
+    if not result.get("resume_available"):
+        return "You have saved jobs, but I need a parsed resume before I can rank which one fits you best."
+
+    lines = ["## Best matches among your saved jobs", ""]
+    for index, job in enumerate(jobs[:5], start=1):
+        score = float(job.get("match_score", 0))
+        title = job.get("title") or "Untitled role"
+        company = job.get("company") or "Unknown company"
+        skills = job.get("matched_skills") or []
+        skill_text = ", ".join(skills[:5]) if skills else "No explicit skill overlap found"
+        lines.append(f"{index}. **{title}** at **{company}** — **{score:.0f}% match**")
+        lines.append(f"   - Matching evidence: {skill_text}")
+    lines.extend([
+        "",
+        "This is a relative ranking based on your parsed resume, not a hiring probability.",
+    ])
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -63,20 +108,36 @@ def chat(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ChatResponse:
+    if _SAVED_JOB_QUERY.search(payload.message):
+        try:
+            response = _saved_job_response(db, current_user.id)
+            logger.info("saved_job_ranking_completed user_id=%s", current_user.id)
+            return ChatResponse(response=response)
+        except Exception as exc:
+            logger.exception("saved_job_ranking_failed user_id=%s", current_user.id)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Saved jobs could not be ranked right now.",
+            ) from exc
+
     try:
+        logger.info("chat_started user_id=%s message_length=%s", current_user.id, len(payload.message))
         agent = create_career_agent(db=db)
         response = agent.respond(current_user, payload.message)
     except AgentConfigurationError as exc:
+        logger.exception("chat_agent_configuration_failed user_id=%s", current_user.id)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
     except (CareerAgentError, ValueError) as exc:
+        logger.exception("chat_failed user_id=%s", current_user.id)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
 
+    logger.info("chat_completed user_id=%s response_length=%s", current_user.id, len(response))
     return ChatResponse(response=response)
 
 

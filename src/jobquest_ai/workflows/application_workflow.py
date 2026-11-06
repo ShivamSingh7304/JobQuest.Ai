@@ -1,5 +1,6 @@
 """Typed orchestration for preparing applications with approval gating."""
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -12,6 +13,8 @@ from jobquest_ai.tools.application_tools import (
     prepare_application,
     summarize_application_status,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ApplicationWorkflowError(RuntimeError):
@@ -89,6 +92,7 @@ def run_application_workflow(
     persisted approval check.
     """
 
+    logger.info("application_workflow_started user_id=%s job_id=%s resume_id=%s", user_id, job_id, resume_id)
     if not isinstance(company, str) or not company.strip():
         raise ValueError("Company cannot be empty.")
     if not isinstance(role, str) or not role.strip():
@@ -223,10 +227,12 @@ def run_application_workflow(
             )
             if update_payload is not None:
                 update_payload(workflow_output_id, user_id, payload)
+        logger.info("application_workflow_completed user_id=%s workflow_output_id=%s approved=%s", user_id, result.workflow_output_id, result.submission_allowed)
         return result
     except ApplicationWorkflowError:
         raise
     except Exception as exc:
+        logger.exception("application_workflow_failed user_id=%s", user_id)
         raise ApplicationWorkflowError(f"Application workflow failed: {exc}") from exc
 
 

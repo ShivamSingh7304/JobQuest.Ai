@@ -20,6 +20,15 @@ class ApplicationRepository:
     def get_by_id(self, application_id: int) -> Application | None:
         return self.db.get(Application, application_id)
 
+    def get_by_user_and_job(
+        self, user_id: int, job_id: int
+    ) -> Application | None:
+        statement = select(Application).where(
+            Application.user_id == user_id,
+            Application.job_id == job_id,
+        )
+        return self.db.scalars(statement).first()
+
     def list_by_user(
         self,
         user_id: int,

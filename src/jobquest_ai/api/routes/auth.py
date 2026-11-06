@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -12,6 +13,7 @@ from jobquest_ai.database.connection import get_db
 from jobquest_ai.database.models.user import User
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+logger = logging.getLogger(__name__)
 
 
 class RegisterRequest(BaseModel):
@@ -42,6 +44,7 @@ def register(
             email=str(data.email),
             password=data.password,
         )
+        logger.info("user_registered user_id=%s", user.id)
 
         return user
 
@@ -65,12 +68,15 @@ def login(
     db: Annotated[Session, Depends(get_db)],
 ):
     try:
-        return AuthService(db).login(
+        result = AuthService(db).login(
             email=form_data.username,
             password=form_data.password,
         )
+        logger.info("user_login_succeeded")
+        return result
 
     except ValueError as exc:
+        logger.warning("user_login_failed reason=%s", str(exc))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(exc),

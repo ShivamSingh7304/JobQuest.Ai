@@ -1,12 +1,15 @@
 
 """Generate structured interview questions using Groq."""
 
+import logging
 import os
 from typing import Literal
 
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -82,6 +85,67 @@ class InterviewQuestionSet(BaseModel):
     )
 
 
+def _fallback_question_set(
+    target_role: str,
+    question_count: int,
+    categories: list[QuestionCategory],
+    difficulty: QuestionDifficulty,
+) -> InterviewQuestionSet:
+    """Return usable starter questions when the LLM is unavailable."""
+    prompts = [
+        (
+            "Tell me about a time you solved a difficult problem.",
+            "behavioral",
+            "problem solving, ownership, and measurable results",
+        ),
+        (
+            f"How would you design a reliable solution for a {target_role} role?",
+            "technical",
+            "technical reasoning, trade-offs, and reliability",
+        ),
+        (
+            "Describe a project from your background and the impact it had.",
+            "resume",
+            "clear communication and evidence from your experience",
+        ),
+        (
+            "How do you prioritize competing tasks when deadlines are tight?",
+            "hr",
+            "prioritization, communication, and judgment",
+        ),
+        (
+            "What would you improve in your approach after receiving critical feedback?",
+            "behavioral",
+            "self-awareness, learning, and follow-through",
+        ),
+    ]
+    allowed = set(categories)
+    selected = [prompt for prompt in prompts if prompt[1] in allowed]
+    if not selected:
+        selected = [prompts[0]]
+    questions = []
+    for index in range(question_count):
+        question, category, purpose = selected[index % len(selected)]
+        questions.append(
+            InterviewQuestion(
+                question_id=f"fallback-{index + 1}",
+                category=category,
+                difficulty=difficulty,
+                question=question,
+                purpose=f"Assess {purpose}.",
+                model_answer="Use a specific example, explain your reasoning, and describe the result.",
+                evaluation_rubric=[
+                    EvaluationCriterion(
+                        criterion="Structure and evidence",
+                        expected_elements=["A clear example", "Specific actions", "A concrete result"],
+                        max_score=10,
+                    )
+                ],
+            )
+        )
+    return InterviewQuestionSet(target_role=target_role, questions=questions)
+
+
 def generate_interview_questions(
     target_role: str,
     job_description: str,
@@ -96,6 +160,7 @@ def generate_interview_questions(
     Questions include reference answers and evaluation rubrics.
     """
 
+    logger.info("interview_question_generation_started role=%s question_count=%s", target_role, question_count)
     if not isinstance(target_role, str) or not target_role.strip():
         raise QuestionGenerationError(
             "target_role must be a non-empty string."
@@ -154,8 +219,9 @@ def generate_interview_questions(
         )
 
     if not os.getenv("GROQ_API_KEY"):
-        raise QuestionGenerationError(
-            "GROQ_API_KEY is not configured."
+        logger.warning("interview_question_generation_fallback reason=missing_api_key")
+        return _fallback_question_set(
+            target_role, question_count, selected_categories, difficulty
         )
 
     model_name = os.getenv(
@@ -267,12 +333,17 @@ Return only output matching the required structured schema.
                 "categories."
             )
 
+        logger.info("interview_question_generation_completed question_count=%s", len(result.questions))
         return result
 
     except QuestionGenerationError:
-        raise
+        logger.warning("interview_question_generation_fallback reason=invalid_model_output")
+        return _fallback_question_set(
+            target_role, question_count, selected_categories, difficulty
+        )
 
-    except Exception as exc:
-        raise QuestionGenerationError(
-            f"Unable to generate interview questions: {exc}"
-        ) from exc
+    except Exception:
+        logger.exception("interview_question_generation_failed_using_fallback")
+        return _fallback_question_set(
+            target_role, question_count, selected_categories, difficulty
+        )

@@ -1,4 +1,4 @@
-
+import logging
 from typing import Any
 
 from jobquest_ai.jobs.job_matcher import (
@@ -13,6 +13,9 @@ from jobquest_ai.jobs.job_search import (
 
 class JobServiceError(Exception):
     """Raised when the job search and matching workflow fails."""
+
+
+logger = logging.getLogger(__name__)
 
 
 class JobService:
@@ -91,6 +94,7 @@ class JobService:
             )
 
         try:
+            logger.info("job_search_started query=%s country=%s max_pages=%s", query.strip(), country.strip(), max_pages)
             search_result = self.job_search.search_multiple_pages(
                 query=query.strip(),
                 country=country.strip(),
@@ -104,8 +108,10 @@ class JobService:
                 jobs=jobs,
                 top_k=top_k,
             )
+            logger.info("job_matching_completed fetched=%s matched=%s", len(jobs), len(ranked_jobs))
 
         except (JobSearchError, JobMatchingError) as error:
+            logger.exception("job_search_or_matching_failed")
             raise JobServiceError(
                 f"Job search and matching failed: {error}"
             ) from error

@@ -1,9 +1,12 @@
 from dotenv import load_dotenv
+from jobquest_ai.logging_config import configure_logging
 
 # Load secrets before importing authentication modules.
 load_dotenv()
+configure_logging()
 
 from fastapi import FastAPI
+import logging
 
 from jobquest_ai.api.routes.auth import router as auth_router
 from jobquest_ai.api.routes.applications import router as applications_router
@@ -16,8 +19,12 @@ from jobquest_ai.api.routes.workflow_outputs import router as workflow_outputs_r
 from jobquest_ai.api.routes.jobs import router as jobs_router
 from jobquest_ai.api.routes.resumes import router as resumes_router
 from jobquest_ai.database.connection import create_tables
+from jobquest_ai.api.middleware import RequestLoggingMiddleware
+from jobquest_ai.startup import warm_up_components
 
 app = FastAPI(title="JobQuest.Ai API")
+logger = logging.getLogger(__name__)
+app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(auth_router)
 app.include_router(applications_router)
@@ -34,6 +41,8 @@ app.include_router(resumes_router)
 @app.on_event("startup")
 def startup():
     create_tables()
+    warm_up_components()
+    logger.info("JobQuest.Ai API started")
 
 
 @app.get("/")

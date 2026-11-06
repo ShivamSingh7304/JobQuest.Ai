@@ -1,4 +1,4 @@
-
+import logging
 import json
 from typing import Any
 
@@ -9,11 +9,13 @@ from mcp.client.streamable_http import streamablehttp_client
 CALENDAR_MCP_URL = (
     "https://calendarmcp.googleapis.com/mcp/v1"
 )
+logger = logging.getLogger(__name__)
 
 
 async def inspect_calendar_server(access_token: str):
     """Connect with an existing OAuth access token and list tools."""
 
+    logger.info("calendar_mcp_inspection_started")
     async with streamablehttp_client(
         CALENDAR_MCP_URL,
         headers={
@@ -27,13 +29,15 @@ async def inspect_calendar_server(access_token: str):
 
             result = await session.list_tools()
 
-            return [
+            tools = [
                 {
                     "name": tool.name,
                     "description": tool.description or "",
                 }
                 for tool in result.tools
             ]
+            logger.info("calendar_mcp_inspection_completed tool_count=%s", len(tools))
+            return tools
 
 
 async def list_calendar_events(
@@ -45,6 +49,7 @@ async def list_calendar_events(
     page_size: int = 50,
 ):
     """Read upcoming events from Google's hosted Calendar MCP server."""
+    logger.info("calendar_mcp_list_started")
     async with streamablehttp_client(
         CALENDAR_MCP_URL,
         headers={"Authorization": f"Bearer {access_token}"},
@@ -72,6 +77,7 @@ async def list_calendar_events(
         raise RuntimeError(message)
     structured = getattr(result, "structuredContent", None)
     if isinstance(structured, dict):
+        logger.info("calendar_mcp_list_completed response_type=structured")
         return structured
     for item in getattr(result, "content", []):
         text = getattr(item, "text", None)
@@ -81,6 +87,7 @@ async def list_calendar_events(
             except json.JSONDecodeError:
                 continue
             if isinstance(decoded, dict):
+                logger.info("calendar_mcp_list_completed response_type=text")
                 return decoded
     raise RuntimeError("Google Calendar MCP returned an unreadable response.")
 
@@ -99,6 +106,7 @@ async def list_calendar_events_rest(
     Preview projects. The same read-only OAuth scope can read events through
     this endpoint while MCP access is pending.
     """
+    logger.info("calendar_rest_list_started")
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.get(
             "https://www.googleapis.com/calendar/v3/calendars/primary/events",
@@ -117,11 +125,13 @@ async def list_calendar_events_rest(
             f"Google Calendar REST returned HTTP {response.status_code}."
         )
     payload = response.json()
-    return {
+    result = {
         "summary": payload.get("summary"),
         "timeZone": payload.get("timeZone", time_zone),
         "events": payload.get("items", []),
     }
+    logger.info("calendar_rest_list_completed event_count=%s", len(result["events"]))
+    return result
 
 
 async def create_calendar_event_rest(
@@ -135,6 +145,7 @@ async def create_calendar_event_rest(
     time_zone: str = "Asia/Calcutta",
 ):
     """Create an event through Google Calendar's events.insert endpoint."""
+    logger.info("calendar_rest_create_started title=%s", title)
     body: dict[str, Any] = {
         "summary": title,
         "start": {"dateTime": start_time, "timeZone": time_zone},
@@ -155,4 +166,61 @@ async def create_calendar_event_rest(
         if response.status_code in {401, 403}:
             raise RuntimeError("Calendar write access is not authorized. Reconnect Google Calendar and approve event creation.")
         raise RuntimeError(f"Google Calendar returned HTTP {response.status_code}.")
+    result = response.json()
+    logger.info("calendar_rest_create_completed event_id=%s", result.get("id"))
+    return result
+
+
+async def update_calendar_event_rest(
+    access_token: str,
+    *,
+    event_id: str,
+    title: str | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    description: str | None = None,
+    location: str | None = None,
+    time_zone: str = "Asia/Calcutta",
+):
+    """Update selected fields on a Google Calendar event."""
+    body: dict[str, Any] = {}
+    if title is not None:
+        body["summary"] = title
+    if start_time is not None:
+        body["start"] = {"dateTime": start_time, "timeZone": time_zone}
+    if end_time is not None:
+        body["end"] = {"dateTime": end_time, "timeZone": time_zone}
+    if description is not None:
+        body["description"] = description
+    if location is not None:
+        body["location"] = location
+    if not body:
+        raise RuntimeError("At least one event field must be provided to update.")
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.patch(
+            f"https://www.googleapis.com/calendar/v3/calendars/primary/events/{event_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"sendUpdates": "all"},
+            json=body,
+        )
+    if response.is_error:
+        if response.status_code in {401, 403}:
+            raise RuntimeError("Calendar write access is not authorized. Reconnect Google Calendar and approve event creation.")
+        raise RuntimeError(f"Google Calendar returned HTTP {response.status_code}.")
     return response.json()
+
+
+async def delete_calendar_event_rest(access_token: str, *, event_id: str):
+    """Delete a Google Calendar event."""
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.delete(
+            f"https://www.googleapis.com/calendar/v3/calendars/primary/events/{event_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"sendUpdates": "all"},
+        )
+    if response.is_error:
+        if response.status_code in {401, 403}:
+            raise RuntimeError("Calendar write access is not authorized. Reconnect Google Calendar and approve event creation.")
+        if response.status_code == 404:
+            raise RuntimeError("Calendar event was not found.")
+        raise RuntimeError(f"Google Calendar returned HTTP {response.status_code}.")

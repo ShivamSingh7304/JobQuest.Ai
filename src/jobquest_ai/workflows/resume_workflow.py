@@ -1,11 +1,14 @@
 """Typed orchestration for resume analysis and role-specific guidance."""
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from jobquest_ai.resume.resume_analyzer import analyze_resume
 from jobquest_ai.resume.resume_tailor import TailoredResume, tailor_resume
 from jobquest_ai.tools.resume_tools import analyze_uploaded_resume
+
+logger = logging.getLogger(__name__)
 
 
 class ResumeWorkflowError(RuntimeError):
@@ -86,6 +89,7 @@ def run_resume_workflow(
     """
 
     content, role = _validate_inputs(resume_content, target_role)
+    logger.info("resume_workflow_started user_id=%s role=%s content_length=%s", user_id, role, len(content))
 
     try:
         if file_path:
@@ -111,6 +115,7 @@ def run_resume_workflow(
     except ResumeWorkflowError:
         raise
     except Exception as exc:
+        logger.exception("resume_workflow_failed user_id=%s", user_id)
         raise ResumeWorkflowError(f"Resume workflow failed: {exc}") from exc
 
     result = ResumeWorkflowResult(
@@ -149,6 +154,7 @@ def run_resume_workflow(
             original_content_unchanged=result.original_content_unchanged,
             next_steps=result.next_steps,
         )
+    logger.info("resume_workflow_completed user_id=%s workflow_output_id=%s", user_id, result.workflow_output_id)
     return result
 
 

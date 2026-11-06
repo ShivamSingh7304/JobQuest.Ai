@@ -1,13 +1,79 @@
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
   ArrowRight, Bell, BriefcaseBusiness, CalendarDays, Check, ChevronRight,
   CircleHelp, FileText, LayoutDashboard, LogOut, Menu, MessageCircle,
-  Plus, Search, Settings2, ShieldCheck, Sparkles, Target, X, Zap,
+  Plus, Search, ShieldCheck, Sparkles, Target, X, Zap,
 } from 'lucide-react'
 import './styles.css'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
+const calendarDataCache = { token: null, data: null, promise: null }
+const jobDiscoveryCache = { token: null, data: null, promise: null }
+
+function resumeSearchProfile(resume) {
+  const profile = resume?.parsed_data || {}
+  const roles = [
+    ...(Array.isArray(profile.suggested_roles) ? profile.suggested_roles : []),
+    ...(Array.isArray(profile.preferred_roles) ? profile.preferred_roles : []),
+  ].filter((value) => typeof value === 'string' && value.trim())
+  const experienceRoles = Array.isArray(profile.experience)
+    ? profile.experience.map((item) => item?.role).filter((value) => typeof value === 'string' && value.trim())
+    : []
+  const skills = [
+    ...(Array.isArray(profile.skills) ? profile.skills : []),
+    ...(Array.isArray(profile.programming_languages) ? profile.programming_languages : []),
+    ...(Array.isArray(profile.frameworks_and_libraries) ? profile.frameworks_and_libraries : []),
+  ].filter((value) => typeof value === 'string' && value.trim())
+  const query = [...roles, ...experienceRoles, ...skills].filter((value, index, values) => values.indexOf(value) === index).slice(0, 5).join(' ') || 'software developer'
+  const location = Array.isArray(profile.preferred_locations) && profile.preferred_locations[0]
+  return { query: query.slice(0, 200), country: typeof location === 'string' && location.trim() ? location.trim() : 'India' }
+}
+
+function preloadJobs(token) {
+  if (!token) return Promise.resolve(null)
+  if (jobDiscoveryCache.token === token && jobDiscoveryCache.data) return Promise.resolve(jobDiscoveryCache.data)
+  if (jobDiscoveryCache.token === token && jobDiscoveryCache.promise) return jobDiscoveryCache.promise
+  jobDiscoveryCache.token = token
+  jobDiscoveryCache.promise = apiRequest('/resumes').then((resumes) => {
+    const resume = resumes[0]
+    if (!resume) return null
+    const search = resumeSearchProfile(resume)
+    return apiRequest('/jobs/match', {
+      method: 'POST',
+      body: JSON.stringify({ resume_id: resume.id, query: search.query, country: search.country, limit: 10, max_pages: 1 }),
+    }).then((result) => {
+      const data = { resumeId: resume.id, query: search.query, country: search.country, result }
+      jobDiscoveryCache.data = data
+      return data
+    })
+  }).catch((error) => {
+    jobDiscoveryCache.promise = null
+    throw error
+  })
+  return jobDiscoveryCache.promise
+}
+
+function preloadCalendar(token, force = false) {
+  if (!token) return Promise.resolve(null)
+  if (!force && calendarDataCache.token === token && calendarDataCache.data) {
+    return Promise.resolve(calendarDataCache.data)
+  }
+  if (!force && calendarDataCache.token === token && calendarDataCache.promise) {
+    return calendarDataCache.promise
+  }
+  calendarDataCache.token = token
+  calendarDataCache.promise = apiRequest('/calendar/events?days=42').then((data) => {
+    calendarDataCache.data = data
+    return data
+  }).catch((error) => {
+    calendarDataCache.promise = null
+    throw error
+  })
+  return calendarDataCache.promise
+}
 
 async function apiRequest(path, options = {}) {
   const token = localStorage.getItem('jobquest_token')
@@ -46,6 +112,8 @@ function App() {
 
   useEffect(() => {
     if (!token) return
+    preloadCalendar(token).catch(() => {})
+    preloadJobs(token).catch(() => {})
     apiRequest('/auth/me').then(setUser).catch(() => {
       localStorage.removeItem('jobquest_token')
       setToken(null)
@@ -101,10 +169,10 @@ function App() {
       <div className="profile-switch"><div className="avatar">{initials(user?.full_name || 'Alex Sharma')}</div><div><strong>{user?.full_name || 'Your workspace'}</strong><small>Personal workspace</small></div><ChevronRight size={15} /></div>
       <p className="section-label">WORKSPACE</p>
       <nav>{navItems.map(([label, Icon]) => <button key={label} className={active === label ? 'active' : ''} onClick={() => { setActive(label); setMobileOpen(false) }}><Icon size={17} /><span>{label}</span>{label === 'Human review' && <b className="alert">2</b>}</button>)}</nav>
-      <div className="sidebar-bottom"><div className="pro-card"><div className="pro-icon"><Zap size={16} /></div><strong>Keep your momentum</strong><p>One focused action today compounds.</p><button onClick={() => setActive('Career coach')}>Ask your coach <ArrowRight size={14} /></button></div><button className="settings"><Settings2 size={16} /> Settings</button><button className="settings" onClick={logout}><LogOut size={16} /> Sign out</button></div>
+      <div className="sidebar-bottom"><div className="pro-card"><div className="pro-icon"><Zap size={16} /></div><strong>Keep your momentum</strong><p>One focused action today compounds.</p><button onClick={() => setActive('Career coach')}>Ask your coach <ArrowRight size={14} /></button></div><button className="settings" onClick={logout}><LogOut size={16} /> Sign out</button></div>
     </aside>
     <main className="main">
-      <header className="topbar"><button className="mobile-menu" onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X /> : <Menu />}</button><div className="breadcrumbs"><span>Workspace</span><i>/</i><strong>{active}</strong></div><div className="top-actions"><button className="icon-button" onClick={() => notify('You are all caught up')}><Bell size={18} /><i /></button><button className="icon-button"><CircleHelp size={18} /></button><div className="avatar">{initials(user?.full_name || 'Alex Sharma')}</div></div></header>
+      <header className="topbar"><button className="mobile-menu" onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X /> : <Menu />}</button><div className="breadcrumbs"><span>Workspace</span><i>/</i><strong>{active}</strong></div><div className="top-actions"><button className="icon-button" aria-label="Notifications" title="Notifications" onClick={() => notify('You are all caught up')}><Bell size={18} /><i /></button><button className="icon-button" aria-label="Help" title="Help" onClick={() => notify('Need help? Ask Career Coach for guidance.') }><CircleHelp size={18} /></button><div className="avatar">{initials(user?.full_name || 'Alex Sharma')}</div></div></header>
       <div className="page">{renderView(active, { notify, setActive, user })}</div>
     </main>
     {toast && <div className="toast"><Check size={16} />{toast}</div>}
@@ -144,12 +212,12 @@ async function loginRequest(email, password) {
 }
 
 function renderView(active, props) {
-  if (active === 'Overview') return <DynamicOverview {...props} />
+  if (active === 'Overview') return <MeaningfulOverview {...props} />
   if (active === 'Resumes') return <Resumes {...props} />
   if (active === 'Job discovery') return <Jobs {...props} />
   if (active === 'Applications') return <Applications {...props} />
   if (active === 'Human review') return <Review {...props} />
-  if (active === 'Career coach') return <Coach {...props} />
+  if (active === 'Career coach') return <MarkdownCoach {...props} />
   if (active === 'Calendar') return <Calendar {...props} />
   return <Interview {...props} />
 }
@@ -165,6 +233,27 @@ function DynamicOverview({ setActive, notify, user }) {
     <div className="metric-grid"><Metric label="Active applications" value={data ? data.active_applications : '—'} note="Across your saved and submitted roles" tone="lavender" icon={<BriefcaseBusiness size={16} />} /><Metric label="Resumes" value={data ? data.resume_count : '—'} note="Saved in your workspace" tone="green" visual={<span className="metric-ring">{data?.resume_count || 0}</span>} /><Metric label="Interview pipeline" value={data ? data.interviewing_applications : '—'} note="Applications at interview stage" visual={<div className="progress"><i style={{ width: `${data ? Math.min(data.interviewing_applications * 20, 100) : 0}%` }} /></div>} /><Metric label="Saved opportunities" value={data ? data.saved_opportunities : '—'} note="Applications waiting to move forward" visual={<div className="bars"><i /><i /><i /><i /><i /></div>} /></div>
     <div className="overview-grid"><section className="card"><CardTitle title="Today’s focus" subtitle="Small steps, meaningful progress." link="View plan" onClick={() => notify('Your plan is up to date')} /><FocusRow done={Boolean(data?.resume_count)} title="Keep your resume ready" meta="Resume workspace" onClick={() => setActive('Resumes')} /><FocusRow title="Review your applications" meta="Application tracker" onClick={() => setActive('Applications')} /><FocusRow title="Practice interview questions" meta="Interview prep" onClick={() => setActive('Interview prep')} /></section><section className="coach-card"><span className="coach-label"><Sparkles size={14} /> CAREER COACH</span><h2>Keep your momentum.</h2><p>{data ? `You have ${data.active_applications} active application${data.active_applications === 1 ? '' : 's'} to keep moving.` : 'Loading your application activity…'}</p><button className="button light" onClick={() => setActive('Career coach')}>Start a conversation <ArrowRight size={16} /></button></section></div>
     <div className="overview-grid lower"><section className="card"><CardTitle title="Application pulse" subtitle="Latest movement across your applications." link="See all" onClick={() => setActive('Applications')} /><div className="table"><div className="table-head"><span>ROLE</span><span>COMPANY</span><span>STAGE</span><span>UPDATED</span></div>{applications.length ? applications.map((item) => <ApplicationRow key={item.id} role={item.role} company={item.company} stage={item.stage} tone={item.status === 'interviewing' ? 'purple' : item.status === 'pending_approval' ? 'orange' : 'blue'} updated={new Date(item.updated_at).toLocaleDateString()} />) : <p className="empty-copy">No applications yet. Save a role from Job discovery to get started.</p>}</div></section><section className="card top-match"><CardTitle title="Your next move" subtitle="Based on your current application activity." /><div className="job-line"><div className="company-logo">{data?.active_applications || 0}</div><div><strong>{data?.active_applications ? 'Keep your applications moving' : 'Find your first opportunity'}</strong><small>{data?.active_applications ? 'Review pending applications and prepare for interviews.' : 'Search roles matched to your resume.'}</small></div></div><div className="match-footer"><button className="link" onClick={() => setActive(data?.active_applications ? 'Applications' : 'Job discovery')}>{data?.active_applications ? 'View applications' : 'Find roles'} <ArrowRight size={14} /></button></div></section></div></>
+}
+
+function MeaningfulOverview({ setActive, notify, user }) {
+  const [data, setData] = useState(null)
+  useEffect(() => { apiRequest('/overview').then(setData).catch((err) => notify(err.message)) }, [])
+  const applications = data?.recent_applications || []
+  const firstName = user?.full_name?.split(' ')[0] || 'there'
+  const hasResume = Boolean(data?.resume_count)
+  const hasInterview = Boolean(data?.interviewing_applications)
+  const nextAction = !data ? 'Loading your next move...' : !hasResume ? 'Upload your resume to unlock matching.' : hasInterview ? 'Prepare for your next interview.' : data.saved_opportunities ? 'Review a saved opportunity and move it forward.' : 'Find a role that matches your experience.'
+  const nextActionMeta = !data ? 'Gathering your workspace activity.' : !hasResume ? 'Resume workspace · 5 min' : hasInterview ? 'Interview prep · 20 min' : data.saved_opportunities ? 'Applications · 10 min' : 'Job discovery · 10 min'
+  const nextActionTarget = !data ? 'Overview' : !hasResume ? 'Resumes' : hasInterview ? 'Interview prep' : data.saved_opportunities ? 'Applications' : 'Job discovery'
+  const resumeProgress = hasResume ? 100 : 0
+  const applicationProgress = data ? Math.min(data.active_applications * 10, 100) : 0
+  const interviewProgress = data ? Math.min(data.interviewing_applications * 25, 100) : 0
+  return <>
+    <Header eyebrow="YOUR WORKSPACE" title={<>Good morning, {firstName} <span className="spark">✦</span></>} subtitle="A clear view of what to do next in your job search." action={<button className="button" onClick={() => setActive('Career coach')}>Ask your career coach <ArrowRight size={16} /></button>} />
+    <div className="metric-grid overview-metrics"><Metric label="Active applications" value={data ? data.active_applications : '—'} note="Roles currently in motion" tone="lavender" icon={<BriefcaseBusiness size={16} />} /><Metric label="Resume readiness" value={data ? `${data.resume_count ? 100 : 0}%` : '—'} note={hasResume ? 'Resume ready for matching' : 'Add a resume to begin'} tone="green" visual={<span className="metric-ring">{data?.resume_count ? 100 : 0}</span>} /><Metric label="Interview pipeline" value={data ? data.interviewing_applications : '—'} note={hasInterview ? 'Preparation is your next focus' : 'No interviews yet'} visual={<div className="progress"><i style={{ width: `${interviewProgress}%` }} /></div>} /><Metric label="Saved opportunities" value={data ? data.saved_opportunities : '—'} note="Roles waiting for your review" visual={<div className="bars"><i /><i /><i /><i /><i /></div>} /></div>
+    <div className="overview-grid overview-primary"><section className="card next-action-card"><span className="eyebrow">RECOMMENDED NEXT MOVE</span><h2>{nextAction}</h2><p>{nextActionMeta}</p><button className="button" onClick={() => nextActionTarget !== 'Overview' && setActive(nextActionTarget)} disabled={!data}>{data ? 'Take the next step' : 'Loading workspace'} <ArrowRight size={16} /></button></section><section className="card progress-card"><CardTitle title="Your momentum" subtitle="A simple view of your career workflow." /><div className="progress-step"><span className="progress-dot done" /><div><strong>Profile foundation</strong><small>{hasResume ? 'Resume available' : 'Resume needed'}</small></div><b>{resumeProgress}%</b></div><div className="progress-track"><i style={{ width: `${resumeProgress}%` }} /></div><div className="progress-step"><span className={`progress-dot ${data?.active_applications ? 'done' : ''}`} /><div><strong>Applications in motion</strong><small>{data?.active_applications || 0} active role{data?.active_applications === 1 ? '' : 's'}</small></div><b>{applicationProgress}%</b></div><div className="progress-track"><i style={{ width: `${applicationProgress}%` }} /></div><div className="progress-step"><span className={`progress-dot ${hasInterview ? 'done' : ''}`} /><div><strong>Interview readiness</strong><small>{hasInterview ? 'Interview stage reached' : 'Keep building momentum'}</small></div><b>{interviewProgress}%</b></div></section></div>
+    <div className="overview-grid lower"><section className="card"><CardTitle title="Application pulse" subtitle="The latest movement across your pipeline." link="View applications" onClick={() => setActive('Applications')} /><div className="table"><div className="table-head"><span>ROLE</span><span>COMPANY</span><span>STAGE</span><span>UPDATED</span></div>{applications.length ? applications.map((item) => <ApplicationRow key={item.id} role={item.role} company={item.company} stage={item.stage} tone={item.status === 'interviewing' ? 'purple' : item.status === 'pending_approval' ? 'orange' : 'blue'} updated={new Date(item.updated_at).toLocaleDateString()} />) : <p className="empty-copy">Your pipeline is empty. Start by finding a role matched to your resume.</p>}</div></section><section className="coach-card overview-coach"><span className="coach-label"><Sparkles size={14} /> CAREER COACH</span><h2>{hasInterview ? 'Turn the interview into an offer.' : 'Build momentum one step at a time.'}</h2><p>{hasInterview ? 'Practice a focused question set before your next conversation.' : 'I can help you choose a target role, improve your resume, and plan your next application.'}</p><button className="button light" onClick={() => setActive(hasInterview ? 'Interview prep' : 'Career coach')}>{hasInterview ? 'Practice interview' : 'Start a conversation'} <ArrowRight size={16} /></button></section></div>
+  </>
 }
 
 function Header({ eyebrow, title, subtitle, action }) { return <div className="page-header"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{subtitle}</p></div>{action}</div> }
@@ -187,13 +276,14 @@ function Resumes({ notify }) {
   return <><Header eyebrow="RESUME WORKSPACE" title="Your resumes" subtitle="Build a sharper story for every opportunity." action={<label className="button file-button"><Plus size={16} /> Choose resume<input type="file" accept=".pdf,.docx" onChange={(e) => setFile(e.target.files?.[0])} /></label>} /><div className="resume-grid"><section className="card"><CardTitle title="Saved resumes" subtitle={`${items.length} resume${items.length === 1 ? '' : 's'} in your workspace`} />{items.length ? items.map((item) => <div className={`resume-item ${String(item.id) === selectedResumeId ? 'selected' : ''}`} key={item.id}><button className="resume-select" onClick={() => setSelectedResumeId(String(item.id))}><div className="file-icon">{item.original_filename.toLowerCase().endsWith('.docx') ? 'DOCX' : 'PDF'}</div><div><strong>{item.original_filename}</strong><small>Version {item.version} · analyzed</small><div className="chips"><span>{String(item.id) === selectedResumeId ? 'Selected' : 'Ready for matching'}</span></div></div></button><div className="resume-actions"><a className="link" href={`/api/resumes/preview/${item.id}`} target="_blank" rel="noreferrer">Preview <ArrowRight size={13} /></a><button className="link danger-link" onClick={() => remove(item)}>Remove <X size={13} /></button></div></div>) : <Empty title="No resumes yet" text="Upload a PDF or DOCX to start your workspace." />}<button className="button full" onClick={upload} disabled={busy || !file}>{busy ? 'Uploading…' : 'Upload selected resume'} <ArrowRight size={16} /></button></section><section className="card tailor"><span className="coach-label purple"><Sparkles size={14} /> AI RESUME TAILORING</span><h2>Make your resume fit the role.</h2><p>Choose a saved resume and paste the target job description. Your original stays unchanged.</p><label>Target job description<textarea value={jobDescription} onChange={(e) => setJobDescription(e.target.value)} placeholder="Paste the full job description here…" rows="8" /></label><button className="button" onClick={tailor} disabled={busy || !selectedResumeId}>{busy ? 'Tailoring…' : 'Analyze and tailor'} <ArrowRight size={16} /></button>{workflow && <div className="workflow-result"><span className="eyebrow">DRAFT #{workflow.workflow_output_id} · PENDING REVIEW</span><h3>{workflow.tailoring.professional_summary}</h3><p>{workflow.tailoring.changes_made?.join(' ')}</p><div className="chips">{(workflow.tailoring.relevant_skills || []).map((skill) => <span key={skill}>{skill}</span>)}</div><small>Human review is open for this draft.</small></div>}</section></div></>
 }
 
-function Jobs({ notify }) { const [query, setQuery] = useState(''); const [country, setCountry] = useState('India'); const [resumeId, setResumeId] = useState(''); const [resumes, setResumes] = useState([]); const [jobs, setJobs] = useState([]); const [savedJobs, setSavedJobs] = useState({}); const [busy, setBusy] = useState(false); const [actionId, setActionId] = useState(''); useEffect(() => { apiRequest('/resumes').then((data) => { setResumes(data); if (data[0]) setResumeId(data[0].id) }).catch(() => {}) }, []); const search = async () => { if (!resumeId || !query.trim()) return notify('Select a resume and enter a search query'); setBusy(true); try { const result = await apiRequest('/jobs/match', { method: 'POST', body: JSON.stringify({ resume_id: Number(resumeId), query, country, limit: 10, max_pages: 2 }) }); setJobs(result.jobs || []); notify(`${result.matched_job_count || 0} matched jobs found`) } catch (err) { notify(err.message) } finally { setBusy(false) } }; const saveJob = async (job, key) => { if (!job.application_url) return notify('This role has no application URL to save'); setActionId(key); try { const saved = await apiRequest('/jobs/save', { method: 'POST', body: JSON.stringify({ external_id: job.external_id || key, title: job.title || 'Untitled role', company_name: job.company_name || 'Unknown company', application_url: job.application_url, description: job.description || null, excerpt: job.excerpt || null, location_restrictions: job.location_restrictions || [], employment_type: job.employment_type || null, seniority: job.seniority || null, published_at: job.published_at || null }) }); setSavedJobs((current) => ({ ...current, [key]: saved })); notify('Job saved to your workspace'); return saved } catch (err) { notify(err.message) } finally { setActionId('') } }; const applyToJob = async (job, key) => { if (!resumeId) return notify('Select a resume before applying'); setActionId(`apply-${key}`); try { const saved = savedJobs[key] || await saveJob(job, key); if (!saved?.job_id) return; const application = await apiRequest('/applications', { method: 'POST', body: JSON.stringify({ job_id: saved.job_id, resume_id: Number(resumeId), status: 'saved' }) }); notify(`Application #${application.id} created`) } catch (err) { notify(err.message) } finally { setActionId('') } }; return <><Header eyebrow="JOB DISCOVERY" title="Find your next opportunity" subtitle="Search live roles and rank them against your resume." action={<button className="button" onClick={search}>{busy ? 'Searching…' : 'Search jobs'} <Search size={16} /></button>} /><section className="search-panel card"><label>Resume<select value={resumeId} onChange={(e) => setResumeId(e.target.value)}><option value="">Choose a resume</option>{resumes.map((r) => <option key={r.id} value={r.id}>{r.original_filename}</option>)}</select></label><label>Search query<input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Python developer" /></label><label>Country<input value={country} onChange={(e) => setCountry(e.target.value)} /></label></section><div className="job-list">{jobs.length ? jobs.map((job, index) => { const key = job.external_id || String(index); const saved = savedJobs[key]; return <article className="card job-card" key={key}><div className="job-content"><div className="job-line"><div className="company-logo">{(job.company_name || 'J')[0]}</div><div><h2>{job.title || 'Untitled role'}</h2><small>{job.company_name || 'Unknown company'} · {job.employment_type || 'Role'}</small></div></div><p className="job-description">{job.description || job.excerpt || 'No description was provided for this listing.'}</p><div className="chips">{(job.matched_skills || []).map((skill) => <span key={skill}>{skill}</span>)}</div><div className="job-actions"><button className="save-button" disabled={actionId === key || Boolean(saved)} onClick={() => saveJob(job, key)}>{saved ? <><Check size={14} /> Saved</> : actionId === key ? 'Saving…' : 'Save job'}</button><button className="button apply-button" disabled={actionId === `apply-${key}`} onClick={() => applyToJob(job, key)}>{actionId === `apply-${key}` ? 'Applying…' : 'Save & apply'} <ArrowRight size={14} /></button>{job.application_url && <a className="external-link" href={job.application_url} target="_blank" rel="noreferrer">Open listing <ArrowRight size={13} /></a>}</div></div><div className="job-score">{Number(job.match_score || 0).toFixed(0)}%<small>match</small></div></article> }) : <Empty title="Ready when you are" text="Search for roles and JobQuest will rank them against your resume." />}</div></> }
+function Jobs({ notify }) { const [query, setQuery] = useState(''); const [country, setCountry] = useState('India'); const [resumeId, setResumeId] = useState(''); const [resumes, setResumes] = useState([]); const [jobs, setJobs] = useState([]); const [savedJobs, setSavedJobs] = useState({}); const [busy, setBusy] = useState(false); const [actionId, setActionId] = useState(''); useEffect(() => { apiRequest('/resumes').then((data) => { setResumes(data); if (data[0]) setResumeId(data[0].id); const cached = jobDiscoveryCache.data; if (cached?.resumeId === data[0]?.id) { const search = resumeSearchProfile(data[0]); setQuery(search.query); setCountry(search.country); setJobs(cached.result.jobs || []) } }).catch(() => {}) }, []); const search = async () => { if (!resumeId || !query.trim()) return notify('Select a resume and enter a search query'); setBusy(true); try { const result = await apiRequest('/jobs/match', { method: 'POST', body: JSON.stringify({ resume_id: Number(resumeId), query, country, limit: 10, max_pages: 2 }) }); setJobs(result.jobs || []); notify(`${result.matched_job_count || 0} matched jobs found`) } catch (err) { notify(err.message) } finally { setBusy(false) } }; const saveJob = async (job, key) => { if (!job.application_url) return notify('This role has no application URL to save'); setActionId(key); try { const saved = await apiRequest('/jobs/save', { method: 'POST', body: JSON.stringify({ external_id: job.external_id || key, title: job.title || 'Untitled role', company_name: job.company_name || 'Unknown company', application_url: job.application_url, description: job.description || null, excerpt: job.excerpt || null, location_restrictions: job.location_restrictions || [], employment_type: job.employment_type || null, seniority: job.seniority || null, published_at: job.published_at || null }) }); setSavedJobs((current) => ({ ...current, [key]: saved })); notify('Job saved to your workspace'); return saved } catch (err) { notify(err.message) } finally { setActionId('') } }; const applyToJob = async (job, key) => { if (!resumeId) return notify('Select a resume before applying'); setActionId(`apply-${key}`); try { const saved = savedJobs[key] || await saveJob(job, key); if (!saved?.job_id) return; const application = await apiRequest('/applications', { method: 'POST', body: JSON.stringify({ job_id: saved.job_id, resume_id: Number(resumeId), status: 'saved' }) }); notify(`Application #${application.id} created`) } catch (err) { notify(err.message) } finally { setActionId('') } }; return <><Header eyebrow="JOB DISCOVERY" title="Find your next opportunity" subtitle="Search live roles and rank them against your resume." action={<button className="button" onClick={search}>{busy ? 'Searching…' : 'Search jobs'} <Search size={16} /></button>} /><section className="search-panel card"><label>Resume<select value={resumeId} onChange={(e) => setResumeId(e.target.value)}><option value="">Choose a resume</option>{resumes.map((r) => <option key={r.id} value={r.id}>{r.original_filename}</option>)}</select></label><label>Search query<input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Python developer" /></label><label>Country<input value={country} onChange={(e) => setCountry(e.target.value)} /></label></section><div className="job-list">{jobs.length ? jobs.map((job, index) => { const key = job.external_id || String(index); const saved = savedJobs[key]; return <article className="card job-card" key={key}><div className="job-content"><div className="job-line"><div className="company-logo">{(job.company_name || 'J')[0]}</div><div><h2>{job.title || 'Untitled role'}</h2><small>{job.company_name || 'Unknown company'} · {job.employment_type || 'Role'}</small></div></div><p className="job-description">{job.description || job.excerpt || 'No description was provided for this listing.'}</p><div className="chips">{(job.matched_skills || []).map((skill) => <span key={skill}>{skill}</span>)}</div><div className="job-actions"><button className="save-button" disabled={actionId === key || Boolean(saved)} onClick={() => saveJob(job, key)}>{saved ? <><Check size={14} /> Saved</> : actionId === key ? 'Saving…' : 'Save job'}</button><button className="button apply-button" disabled={actionId === `apply-${key}`} onClick={() => applyToJob(job, key)}>{actionId === `apply-${key}` ? 'Applying…' : 'Save & apply'} <ArrowRight size={14} /></button>{job.application_url && <a className="external-link" href={job.application_url} target="_blank" rel="noreferrer">Open listing <ArrowRight size={13} /></a>}</div></div><div className="job-score">{Number(job.match_score || 0).toFixed(0)}%<small>match</small></div></article> }) : <Empty title="Ready when you are" text="Search for roles and JobQuest will rank them against your resume." />}</div></> }
 
-function Applications({ notify }) {
+function LegacyApplications({ notify }) {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState('')
   useEffect(() => { apiRequest('/applications').then(setItems).catch((err) => notify(err.message)).finally(() => setLoading(false)) }, [])
+  if (loading) return <><Header eyebrow="APPLICATION TRACKER" title="Keep every opportunity moving" subtitle="Loading your latest application stages." action={<span className="secure"><Sparkles size={14} /> Personalized workspace</span>} /><section className="card application-loading"><div className="loading-orb"><Sparkles size={18} /></div><div><span className="eyebrow">APPLICATION INSIGHT</span><h2>Organizing your opportunities</h2><p>We are loading your latest application stages.</p></div><div className="application-recommendation"><span>Recommended next step</span><strong>Start with one saved job and prepare it for human review.</strong></div><div className="loading-line loading-line-wide" /><div className="loading-line" /></section></>
   const update = async (item, nextStatus) => { if (['approved', 'submitted'].includes(nextStatus) && !item.workflow_output_record_id) return notify('Prepare this application for human review before approving or submitting it'); try { const updated = await apiRequest(`/applications/${item.id}`, { method: 'PATCH', body: JSON.stringify({ status: nextStatus, workflow_output_record_id: item.workflow_output_record_id || undefined }) }); setItems((current) => current.map((entry) => entry.id === item.id ? updated : entry)); notify('Application updated') } catch (err) { notify(err.message) } }
   const prepareForReview = async (item) => { setBusyId(String(item.id)); try { const result = await apiRequest(`/applications/${item.id}/prepare`, { method: 'POST' }); setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: result.status === 'approved_for_submission' ? 'approved' : 'pending_approval', workflow_output_record_id: result.workflow_output_id } : entry)); notify(`Application prepared for review · output #${result.workflow_output_id}`) } catch (err) { notify(err.message) } finally { setBusyId('') } }
   const columns = [
@@ -202,6 +292,112 @@ function Applications({ notify }) {
     { key: 'interviewing', name: 'Interview', color: 'purple', matches: (item) => item.status === 'interviewing' },
   ]
   return <><Header eyebrow="APPLICATION TRACKER" title="Keep every opportunity moving" subtitle={`${items.length} applications · saved → applied → interview.`} action={<button className="button" onClick={() => notify('Create an application from a saved job in Job discovery')}><Plus size={16} /> Add application</button>} />{loading ? <div className="card loading-card">Loading your applications…</div> : <div className="kanban">{columns.map((column) => { const grouped = items.filter(column.matches); return <section className="kanban-col" key={column.key}><div className="kanban-title"><span className={`dot ${column.color}`} /><strong>{column.name}</strong><b>{grouped.length}</b></div>{grouped.length ? grouped.map((item) => <div className="application-card" key={item.id}><strong>Application #{item.id}</strong><span>Job #{item.job_id}</span><small>{item.notes || 'No notes yet'}</small>{!item.workflow_output_record_id && ['saved', 'pending_approval'].includes(item.status) && <button className="link" disabled={busyId === String(item.id)} onClick={() => prepareForReview(item)}>{busyId === String(item.id) ? 'Preparing…' : 'Prepare for human review'} <ShieldCheck size={13} /></button>}<select value={item.status} onChange={(e) => update(item, e.target.value)}><option value="saved">Saved job</option><option value="pending_approval">Applied · pending review</option><option value="approved">Applied · approved</option><option value="submitted">Applied · submitted</option><option value="interviewing">Interview</option></select>{item.workflow_output_record_id && <small>Review output #{item.workflow_output_record_id}</small>}</div>) : <Empty title="Nothing here yet" text="Applications will appear in this stage." />}</section>})}</div>}</>
+}
+
+function ApplicationsWithoutDelete({ notify }) {
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [busyId, setBusyId] = useState('')
+
+  useEffect(() => {
+    apiRequest('/applications')
+      .then(setItems)
+      .catch((err) => notify(err.message))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const update = async (item, nextStatus) => {
+    if (['approved', 'submitted'].includes(nextStatus) && !item.workflow_output_record_id) {
+      return notify('Prepare this application for human review before approving or submitting it')
+    }
+    try {
+      const updated = await apiRequest(`/applications/${item.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: nextStatus, workflow_output_record_id: item.workflow_output_record_id || undefined }),
+      })
+      setItems((current) => current.map((entry) => entry.id === item.id ? updated : entry))
+      notify('Application updated')
+    } catch (err) { notify(err.message) }
+  }
+
+  const prepareForReview = async (item) => {
+    setBusyId(String(item.id))
+    try {
+      const result = await apiRequest(`/applications/${item.id}/prepare`, { method: 'POST' })
+      setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: result.status === 'approved_for_submission' ? 'approved' : 'pending_approval', workflow_output_record_id: result.workflow_output_id } : entry))
+      notify(`Application prepared for review · output #${result.workflow_output_id}`)
+    } catch (err) { notify(err.message) } finally { setBusyId('') }
+  }
+
+  const removeApplication = async (item) => {
+    if (!window.confirm(`Delete the application for ${item.company || 'this company'}?`)) return
+    setBusyId(`delete-${item.id}`)
+    try {
+      await apiRequest(`/applications/${item.id}`, { method: 'DELETE' })
+      setItems((current) => current.filter((entry) => entry.id !== item.id))
+      notify('Application deleted')
+    } catch (err) { notify(err.message) } finally { setBusyId('') }
+  }
+
+  const columns = [
+    { key: 'saved', name: 'Saved jobs', color: 'blue', matches: (item) => item.status === 'saved' },
+    { key: 'in_process', name: 'Applied · in process', color: 'orange', matches: (item) => ['pending_approval', 'approved', 'submitted'].includes(item.status) },
+    { key: 'interviewing', name: 'Interview', color: 'purple', matches: (item) => item.status === 'interviewing' },
+  ]
+
+  return <><Header eyebrow="APPLICATION TRACKER" title="Keep every opportunity moving" subtitle={`${items.length} applications · saved → applied → interview.`} action={<button className="button" onClick={() => notify('Create an application from a saved job in Job discovery')}><Plus size={16} /> Add application</button>} />{loading ? <div className="card loading-card">Loading your applications…</div> : <div className="kanban">{columns.map((column) => { const grouped = items.filter(column.matches); return <section className="kanban-col" key={column.key}><div className="kanban-title"><span className={`dot ${column.color}`} /><strong>{column.name}</strong><b>{grouped.length}</b></div>{grouped.length ? grouped.map((item) => <div className="application-card" key={item.id}><strong>{item.company || 'Company unavailable'}</strong><span>{item.role || `Job #${item.job_id}`}</span><small>{item.notes || 'No notes yet'}</small>{!item.workflow_output_record_id && ['saved', 'pending_approval'].includes(item.status) && <button className="link" disabled={busyId === String(item.id)} onClick={() => prepareForReview(item)}>{busyId === String(item.id) ? 'Preparing…' : 'Prepare for human review'} <ShieldCheck size={13} /></button>}<select value={item.status} onChange={(e) => update(item, e.target.value)}><option value="saved">Saved job</option><option value="pending_approval">Applied · pending review</option><option value="approved">Applied · approved</option><option value="submitted">Applied · submitted</option><option value="interviewing">Interview</option></select>{item.workflow_output_record_id && <small>Review output #{item.workflow_output_record_id}</small>}</div>) : <Empty title="Nothing here yet" text="Applications will appear in this stage." />}</section>})}</div>}</>
+}
+
+function Applications({ notify }) {
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [busyId, setBusyId] = useState('')
+
+  useEffect(() => {
+    apiRequest('/applications').then(setItems).catch((err) => notify(err.message)).finally(() => setLoading(false))
+  }, [])
+
+  const update = async (item, nextStatus) => {
+    if (nextStatus === 'delete') return removeApplication(item)
+    if (['approved', 'submitted'].includes(nextStatus) && !item.workflow_output_record_id) {
+      return notify('Prepare this application for human review before approving or submitting it')
+    }
+    try {
+      const updated = await apiRequest(`/applications/${item.id}`, { method: 'PATCH', body: JSON.stringify({ status: nextStatus, workflow_output_record_id: item.workflow_output_record_id || undefined }) })
+      setItems((current) => current.map((entry) => entry.id === item.id ? updated : entry))
+      notify('Application updated')
+    } catch (err) { notify(err.message) }
+  }
+
+  const prepareForReview = async (item) => {
+    setBusyId(String(item.id))
+    try {
+      const result = await apiRequest(`/applications/${item.id}/prepare`, { method: 'POST' })
+      setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: result.status === 'approved_for_submission' ? 'approved' : 'pending_approval', workflow_output_record_id: result.workflow_output_id } : entry))
+      notify(`Application prepared for review · output #${result.workflow_output_id}`)
+    } catch (err) { notify(err.message) } finally { setBusyId('') }
+  }
+
+  const removeApplication = async (item) => {
+    if (!window.confirm(`Delete the application for ${item.company || 'this company'}?`)) return
+    setBusyId(`delete-${item.id}`)
+    try {
+      await apiRequest(`/applications/${item.id}`, { method: 'DELETE' })
+      setItems((current) => current.filter((entry) => entry.id !== item.id))
+      notify('Application deleted')
+    } catch (err) { notify(err.message) } finally { setBusyId('') }
+  }
+
+  const columns = [
+    { key: 'saved', name: 'Saved jobs', color: 'blue', matches: (item) => item.status === 'saved' },
+    { key: 'in_process', name: 'Applied · in process', color: 'orange', matches: (item) => ['pending_approval', 'approved', 'submitted'].includes(item.status) },
+    { key: 'interviewing', name: 'Interview', color: 'purple', matches: (item) => item.status === 'interviewing' },
+  ]
+
+  return <>
+    <Header eyebrow="APPLICATION TRACKER" title="Keep every opportunity moving" subtitle={`${items.length} applications · saved → applied → interview.`} action={<button className="button" onClick={() => notify('Create an application from a saved job in Job discovery')}><Plus size={16} /> Add application</button>} />
+    {loading ? <div className="card loading-card">Loading your applications…</div> : <div className="kanban">{columns.map((column) => { const grouped = items.filter(column.matches); return <section className="kanban-col" key={column.key}><div className="kanban-title"><span className={`dot ${column.color}`} /><strong>{column.name}</strong><b>{grouped.length}</b></div>{grouped.length ? grouped.map((item) => <div className="application-card" key={item.id}><strong>{item.company || 'Company unavailable'}</strong><span>{item.role || `Job #${item.job_id}`}</span><small>{item.notes || 'No notes yet'}</small>{!item.workflow_output_record_id && ['saved', 'pending_approval'].includes(item.status) && <button className="link" disabled={busyId === String(item.id)} onClick={() => prepareForReview(item)}>{busyId === String(item.id) ? 'Preparing…' : 'Prepare for human review'} <ShieldCheck size={13} /></button>}<select value={item.status} onChange={(e) => update(item, e.target.value)}><option value="saved">Saved job</option><option value="pending_approval">Applied · pending review</option><option value="approved">Applied · approved</option><option value="submitted">Applied · submitted</option><option value="interviewing">Interview</option><option value="delete">Delete application</option></select>{item.workflow_output_record_id && <small>Review output #{item.workflow_output_record_id}</small>}</div>) : <Empty title="Nothing here yet" text="Applications will appear in this stage." />}</section>})}</div>}
+  </>
 }
 
 function Review({ notify }) {
@@ -223,7 +419,96 @@ function Review({ notify }) {
 
 function Coach({ notify }) { const [message, setMessage] = useState(''); const [messages, setMessages] = useState([{ role: 'assistant', content: 'Hey! I’m your career coach. Ask me about your resume, job search, or interview preparation.' }]); const send = async (e) => { e.preventDefault(); if (!message.trim()) return; const current = message; setMessage(''); setMessages([...messages, { role: 'user', content: current }]); try { const result = await apiRequest('/chat', { method: 'POST', body: JSON.stringify({ message: current }) }); setMessages((old) => [...old, { role: 'assistant', content: result.response }]) } catch (err) { notify(err.message) } }; return <><Header eyebrow="CAREER COACH" title="A thinking partner for your next move" subtitle="Ask questions, plan your next step, or get unstuck." /><section className="card chat"><div className="chat-messages">{messages.map((item, i) => <div className={`chat-message ${item.role}`} key={i}>{item.role === 'assistant' && <div className="coach-avatar"><Sparkles size={15} /></div>}<p>{item.content}</p></div>)}</div><form className="chat-input" onSubmit={send}><input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Ask your career coach anything..." /><button><ArrowRight size={16} /></button></form></section></> }
 
-function Calendar({ notify }) {
+function PersistentCoach({ notify }) {
+  const [message, setMessage] = useState('')
+  const [messages, setMessages] = useState([])
+  const [conversations, setConversations] = useState([])
+  const [activeId, setActiveId] = useState('')
+  const [loadingHistory, setLoadingHistory] = useState(true)
+  const [sending, setSending] = useState(false)
+
+  const openConversation = async (conversationId) => {
+    const conversation = await apiRequest(`/conversations/${conversationId}`)
+    setActiveId(String(conversation.id))
+    setMessages(conversation.messages.map((item) => ({ role: item.role, content: item.content })))
+  }
+
+  const createConversation = async () => {
+    const conversation = await apiRequest('/conversations', { method: 'POST', body: JSON.stringify({ title: null }) })
+    setConversations((current) => [conversation, ...current])
+    setActiveId(String(conversation.id))
+    setMessages([])
+    return conversation
+  }
+
+  useEffect(() => {
+    apiRequest('/conversations').then(async (items) => {
+      setConversations(items)
+      if (items[0]) await openConversation(items[0].id)
+      else await createConversation()
+    }).catch((err) => notify(err.message)).finally(() => setLoadingHistory(false))
+  }, [])
+
+  const send = async (event) => {
+    event.preventDefault()
+    if (!message.trim() || sending) return
+    const current = message.trim()
+    setMessage('')
+    setSending(true)
+    try {
+      let conversationId = activeId
+      if (!conversationId) conversationId = String((await createConversation()).id)
+      const userMessage = { role: 'user', content: current }
+      setMessages((old) => [...old, userMessage])
+      await apiRequest(`/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify(userMessage) })
+      const result = await apiRequest('/chat', { method: 'POST', body: JSON.stringify({ message: current }) })
+      const assistantMessage = { role: 'assistant', content: result.response }
+      setMessages((old) => [...old, assistantMessage])
+      await apiRequest(`/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify(assistantMessage) })
+    } catch (err) {
+      notify(err.message)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return <><Header eyebrow="CAREER COACH" title="A thinking partner for your next move" subtitle="Ask questions, plan your next step, or get unstuck." /><section className="card chat"><div className="chat-toolbar"><div><span className="eyebrow">CONVERSATION</span><select value={activeId} disabled={loadingHistory} onChange={(event) => openConversation(event.target.value).catch((err) => notify(err.message))}><option value="">{loadingHistory ? 'Loading history...' : 'Select conversation'}</option>{conversations.map((conversation) => <option value={conversation.id} key={conversation.id}>{conversation.title || 'New conversation'}</option>)}</select></div><button className="link new-chat" onClick={() => createConversation().catch((err) => notify(err.message))}>+ New conversation</button></div><div className="chat-messages">{messages.length ? messages.map((item, i) => <div className={`chat-message ${item.role}`} key={`${activeId}-${i}`}>{item.role === 'assistant' && <div className="coach-avatar"><Sparkles size={15} /></div>}<p>{item.content}</p></div>) : <div className="chat-empty"><Sparkles size={20} /><strong>Start a career conversation</strong><span>Your previous conversations are saved automatically.</span></div>}</div><form className="chat-input" onSubmit={send}><input value={message} onChange={(e) => setMessage(e.target.value)} disabled={sending || loadingHistory} placeholder={sending ? 'Your coach is thinking...' : 'Ask your career coach anything...'} /><button disabled={sending || loadingHistory}><ArrowRight size={16} /></button></form></section></>
+}
+
+function MarkdownCoach({ notify }) {
+  const [message, setMessage] = useState('')
+  const [messages, setMessages] = useState([])
+  const [conversations, setConversations] = useState([])
+  const [activeId, setActiveId] = useState('')
+  const [loadingHistory, setLoadingHistory] = useState(true)
+  const [sending, setSending] = useState(false)
+  const makeConversationTitle = (text) => {
+    const clean = text.replace(/\s+/g, ' ').trim()
+    return clean.length > 52 ? `${clean.slice(0, 49).trimEnd()}…` : clean
+  }
+  const isGenericTitle = (title) => !title || title.toLowerCase() === 'career coaching'
+  const renameConversation = async (conversation, firstMessage) => {
+    if (!conversation || !isGenericTitle(conversation.title) || !firstMessage) return conversation
+    const title = makeConversationTitle(firstMessage)
+    const updated = await apiRequest(`/conversations/${conversation.id}`, { method: 'PATCH', body: JSON.stringify({ title }) })
+    setConversations((current) => current.map((item) => item.id === updated.id ? updated : item))
+    return updated
+  }
+  const openConversation = async (id) => {
+    const conversation = await apiRequest(`/conversations/${id}`)
+    const loadedMessages = conversation.messages.map((item) => ({ role: item.role, content: item.content }))
+    setActiveId(String(conversation.id))
+    setMessages(loadedMessages)
+    const firstUserMessage = loadedMessages.find((item) => item.role === 'user')
+    if (firstUserMessage) await renameConversation(conversation, firstUserMessage.content)
+  }
+  const createConversation = async () => { const conversation = await apiRequest('/conversations', { method: 'POST', body: JSON.stringify({ title: null }) }); setConversations((current) => [conversation, ...current]); setActiveId(String(conversation.id)); setMessages([]); return conversation }
+  useEffect(() => { apiRequest('/conversations').then(async (items) => { setConversations(items); if (items[0]) await openConversation(items[0].id); else await createConversation() }).catch((err) => notify(err.message)).finally(() => setLoadingHistory(false)) }, [])
+  const send = async (event) => { event.preventDefault(); if (!message.trim() || sending) return; const current = message.trim(); setMessage(''); setSending(true); try { let conversationId = activeId; let conversation = conversations.find((item) => String(item.id) === String(conversationId)); if (!conversationId) { conversation = await createConversation(); conversationId = String(conversation.id) } const userMessage = { role: 'user', content: current }; setMessages((old) => [...old, userMessage]); await apiRequest(`/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify(userMessage) }); await renameConversation(conversation, current); const result = await apiRequest('/chat', { method: 'POST', body: JSON.stringify({ message: current }) }); const assistantMessage = { role: 'assistant', content: result.response }; setMessages((old) => [...old, assistantMessage]); await apiRequest(`/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify(assistantMessage) }) } catch (err) { notify(err.message) } finally { setSending(false) } }
+  return <><Header eyebrow="CAREER COACH" title="A thinking partner for your next move" subtitle="Ask questions, plan your next step, or get unstuck." /><section className="card chat"><div className="chat-toolbar"><div><span className="eyebrow">CONVERSATION</span><select value={activeId} disabled={loadingHistory} onChange={(event) => openConversation(event.target.value).catch((err) => notify(err.message))}><option value="">{loadingHistory ? 'Loading history...' : 'Select conversation'}</option>{conversations.map((conversation) => <option value={conversation.id} key={conversation.id}>{conversation.title || 'New conversation'}</option>)}</select></div><button className="link new-chat" onClick={() => createConversation().catch((err) => notify(err.message))}>+ New conversation</button></div><div className="chat-messages">{messages.length ? messages.map((item, i) => <div className={`chat-message ${item.role}`} key={`${activeId}-${i}`}>{item.role === 'assistant' && <div className="coach-avatar"><Sparkles size={15} /></div>}<ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content}</ReactMarkdown></div>) : <div className="chat-empty"><Sparkles size={20} /><strong>Start a career conversation</strong><span>Your previous conversations are saved automatically.</span></div>}</div><form className="chat-input" onSubmit={send}><input value={message} onChange={(e) => setMessage(e.target.value)} disabled={sending || loadingHistory} placeholder={sending ? 'Your coach is thinking...' : 'Ask your career coach anything...'} /><button disabled={sending || loadingHistory}><ArrowRight size={16} /></button></form></section></>
+}
+
+function LegacyCalendar({ notify }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [connecting, setConnecting] = useState(false)
@@ -237,8 +522,31 @@ function Calendar({ notify }) {
   </>
 }
 
+function Calendar({ notify }) {
+  const [data, setData] = useState(() => calendarDataCache.data)
+  const [loading, setLoading] = useState(true)
+  const [connecting, setConnecting] = useState(false)
+  const [month, setMonth] = useState(() => new Date())
+  const load = (force = false) => { setLoading(true); preloadCalendar(localStorage.getItem('jobquest_token'), force).then(setData).catch((err) => notify(err.message)).finally(() => setLoading(false)) }
+  useEffect(load, [])
+  const connect = async () => { setConnecting(true); try { const result = await apiRequest('/calendar/connect', { method: 'POST' }); if (result.authorization_url) window.location.href = result.authorization_url } catch (err) { notify(err.message) } finally { setConnecting(false) } }
+  const events = data?.events || []
+  const eventKey = (event) => event.all_day ? event.start.slice(0, 10) : new Date(event.start).toLocaleDateString('en-CA')
+  const title = month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  const start = new Date(month.getFullYear(), month.getMonth(), 1)
+  start.setDate(start.getDate() - start.getDay())
+  const days = Array.from({ length: 42 }, (_, index) => { const day = new Date(start); day.setDate(start.getDate() + index); return day })
+  const today = new Date().toLocaleDateString('en-CA')
+  const upcoming = [...events].sort((a, b) => new Date(a.start) - new Date(b.start)).slice(0, 6)
+  return <><Header eyebrow="GOOGLE CALENDAR" title="Your interview rhythm" subtitle={data?.connected ? `Synced with ${data.calendar_name || 'your primary calendar'}` : 'Bring your interviews, preparation blocks, and follow-ups into one view.'} action={<div className="calendar-header-actions"><button className="button" onClick={data?.connected ? () => load(true) : connect} disabled={connecting}>{connecting ? 'Opening Google...' : data?.connected ? 'Refresh schedule' : 'Connect Google Calendar'} <CalendarDays size={16} /></button>{data?.connected && <button className="link" onClick={connect} disabled={connecting}>Reconnect for event creation</button>}</div>} />
+    {!data?.connected && !loading && <section className="card calendar-hero calendar-connect"><div className="calendar-icon"><CalendarDays size={22} /></div><span className="eyebrow">GOOGLE CALENDAR MCP</span><h2>Keep your preparation and interviews in sync.</h2><p>Connect Google Calendar to securely read your upcoming schedule.</p><button className="button" onClick={connect} disabled={connecting}>Connect calendar <ArrowRight size={16} /></button></section>}
+    {loading ? <div className="card loading-card">Loading your calendar...</div> : data?.connected && <div className="calendar-dashboard"><section className="card calendar-main"><div className="calendar-toolbar"><button className="calendar-nav" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}>‹</button><h2>{title}</h2><button className="calendar-nav" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}>›</button><button className="link calendar-today" onClick={() => setMonth(new Date())}>Today</button></div><div className="calendar-weekdays">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => <span key={day}>{day}</span>)}</div><div className="calendar-grid">{days.map((day) => { const key = day.toLocaleDateString('en-CA'); const dayEvents = events.filter((event) => eventKey(event) === key); const inMonth = day.getMonth() === month.getMonth(); return <div className={`calendar-day ${inMonth ? '' : 'muted-day'} ${key === today ? 'today-day' : ''}`} key={key}><b>{day.getDate()}</b><div className="calendar-day-events">{dayEvents.slice(0, 3).map((event) => <a className="calendar-chip" href={event.link || undefined} target={event.link ? '_blank' : undefined} rel="noreferrer" key={event.id} title={event.title}><i />{event.title}</a>)}{dayEvents.length > 3 && <small>+{dayEvents.length - 3} more</small>}</div></div>})}</div></section><section className="card upcoming"><CardTitle title="Upcoming" subtitle="Your next career moments" extra={<button className="link" onClick={load}>Refresh</button>} />{upcoming.length ? <div className="event-list">{upcoming.map((event) => <a className="calendar-event" key={event.id} href={event.link || undefined} target={event.link ? '_blank' : undefined} rel="noreferrer"><div className="event-date"><strong>{event.date_label.split(',')[0]}</strong><span>{event.date_label.split(',').slice(1).join(',')}</span></div><div className="event-dot" /><div className="event-details"><strong>{event.title}</strong><small>{event.time_label}{event.location ? ` - ${event.location}` : ''}</small></div><ChevronRight size={16} /></a>)}</div> : <Empty title="Your schedule is clear" text="No events are scheduled in the next 14 days." />}</section></div>}
+  </>
+}
+
 function Interview({ notify }) {
   const [resumes, setResumes] = useState([])
+  const [loadingResumes, setLoadingResumes] = useState(true)
   const [resumeId, setResumeId] = useState('')
   const [jobDescription, setJobDescription] = useState('Software Engineer role requiring clear problem solving, backend fundamentals, APIs, and collaboration.')
   const [mode, setMode] = useState(null)
@@ -251,8 +559,13 @@ function Interview({ notify }) {
     apiRequest('/resumes').then((data) => {
       setResumes(data)
       if (data[0]) setResumeId(String(data[0].id))
-    }).catch((err) => notify(err.message))
+    }).catch((err) => notify(err.message)).finally(() => setTimeout(() => setLoadingResumes(false), 900))
   }, [])
+
+  useEffect(() => {
+    if (!session) return
+    requestAnimationFrame(() => document.querySelector('.interview-session')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }, [session])
 
   const start = async (nextMode) => {
     if (!resumeId) return notify('Upload a resume before starting interview practice')
@@ -300,9 +613,10 @@ function Interview({ notify }) {
 
   const question = session?.question
   return <>
+    {loadingResumes && <section className="card interview-loading-cue"><div className="loading-orb"><Sparkles size={17} /></div><div><span className="eyebrow">RECOMMENDED QUESTION</span><h2>Tell me about a time you solved a difficult problem.</h2><p>Use the STAR structure: situation, task, action, and result.</p></div><span className="interview-loading-label">Preparing your resume-based practice…</span></section>}
     <Header eyebrow="INTERVIEW PREP" title="Practice with purpose" subtitle="Generate tailored questions and get evidence-based AI feedback." action={<button className="button" disabled={busy} onClick={() => start('mock')}>{busy ? 'Generating…' : 'Start mock interview'} <ArrowRight size={16} /></button>} />
     <section className="card interview-setup"><label>Resume<select value={resumeId} onChange={(e) => setResumeId(e.target.value)}><option value="">Choose a resume</option>{resumes.map((resume) => <option key={resume.id} value={resume.id}>{resume.original_filename}</option>)}</select></label><label>Target job description<textarea value={jobDescription} onChange={(e) => setJobDescription(e.target.value)} rows="3" /></label></section>
-    <div className="overview-grid"><section className="card readiness"><div className="readiness-ring">64</div><span className="eyebrow">OVERALL READINESS</span><h2>Good foundation</h2><p>Keep practicing structured answers and system design fundamentals.</p></section><section className="card"><span className="eyebrow">RECOMMENDED PRACTICE</span><h2>Generate a behavioral question from your resume.</h2><p>AI-generated · evidence-based rubric · genuine feedback</p><div className="tip"><Sparkles size={16} /> Your answer will be evaluated against a role-specific rubric.</div><button className="button" disabled={busy} onClick={() => start('practice')}>{busy ? 'Generating…' : 'Practice question'} <ArrowRight size={16} /></button></section></div>
+    <div className="overview-grid"><section className="card readiness"><div className="readiness-ring">64</div><span className="eyebrow">OVERALL READINESS</span><h2>Good foundation</h2><p>Keep practicing structured answers and system design fundamentals.</p></section><section className="card recommended-practice"><span className="eyebrow">RECOMMENDED PRACTICE</span><h2>Tell me about a time you solved a difficult backend problem.</h2><p>Use the STAR method: situation, task, action, and result.</p><div className="tip"><Sparkles size={16} /> Your answer will be evaluated against a role-specific rubric.</div><button className="button" disabled={busy} onClick={() => start('practice')}>{busy ? 'Generating…' : 'Practice this question'} <ArrowRight size={16} /></button></section></div>
     {session && <section className="card interview-session"><div className="review-badge"><Target size={14} /> {question ? (mode === 'mock' ? `MOCK INTERVIEW · QUESTION ${question.question_number} OF ${question.total_questions}` : 'PRACTICE QUESTION') : 'INTERVIEW COMPLETE'}</div>{question && <><h2>{question.question}</h2><p>{question.purpose}</p><form onSubmit={submit}><textarea value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Type your answer here…" rows="8" disabled={busy} /><div className="review-actions"><button type="button" className="reject" onClick={() => { setSession(null); setEvaluation(null) }}>Close</button><button className="button" disabled={busy}>{busy ? 'Evaluating…' : 'Submit answer'} <ArrowRight size={16} /></button></div></form></>}{evaluation && <div className="workflow-result"><span className="eyebrow">AI FEEDBACK · {Number(evaluation.percentage || 0).toFixed(0)}%</span><h3>{evaluation.feedback}</h3>{evaluation.strengths?.length > 0 && <p><b>Strengths:</b> {evaluation.strengths.join(' ')}</p>}{evaluation.improvements?.length > 0 && <p><b>Improve:</b> {evaluation.improvements.join(' ')}</p>}{evaluation.missing_concepts?.length > 0 && <p><b>Missing concepts:</b> {evaluation.missing_concepts.join(', ')}</p>}</div>}</section>}
   </>
 }
