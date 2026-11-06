@@ -34,6 +34,14 @@ from jobquest_ai.workflows.application_workflow import (
 router = APIRouter(prefix="/applications", tags=["Applications"])
 
 
+def _application_response(application: Application) -> ApplicationResponse:
+    response = ApplicationResponse.model_validate(application)
+    return response.model_copy(update={
+        "company": application.job.company if application.job else None,
+        "role": application.job.title if application.job else None,
+    })
+
+
 def _get_owned_application(
     application_id: int,
     current_user: User,
@@ -138,6 +146,13 @@ def create_application(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ApplicationResponse:
     _validate_references(payload, current_user, db)
+    existing = ApplicationRepository(db).get_by_user_and_job(
+        user_id=current_user.id,
+        job_id=payload.job_id,
+    )
+    if existing is not None:
+        return _application_response(existing)
+
     workflow_output_id = None
     if payload.workflow_output_record_id is not None:
         if payload.status in {"approved", "submitted"}:
@@ -172,7 +187,7 @@ def create_application(
         notes=payload.notes,
         workflow_output_id=workflow_output_id,
     )
-    return ApplicationResponse.model_validate(application)
+    return _application_response(application)
 
 
 @router.get(
@@ -196,7 +211,7 @@ def list_applications(
         skip=skip,
         limit=limit,
     )
-    return [ApplicationResponse.model_validate(item) for item in applications]
+    return [_application_response(item) for item in applications]
 
 
 @router.post(
@@ -288,7 +303,7 @@ def update_application(
         notes=payload.notes,
         workflow_output_id=workflow_output_id,
     )
-    return ApplicationResponse.model_validate(updated)
+    return _application_response(updated)
 
 
 @router.delete(

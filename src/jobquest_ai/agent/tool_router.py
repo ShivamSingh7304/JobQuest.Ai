@@ -64,7 +64,8 @@ class ToolRouter:
             "jobs",
             re.compile(
                 r"\b(job search|find jobs|job openings?|job listings?|"
-                r"internships?|job opportunities|match me with jobs)\b",
+                r"internships?|job opportunities|saved jobs?|saved opportunities|"
+                r"best fit|which .*jobs?.*fit|match me with jobs)\b",
                 re.IGNORECASE,
             ),
             "career_coach.md",

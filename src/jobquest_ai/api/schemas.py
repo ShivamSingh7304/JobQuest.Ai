@@ -287,6 +287,8 @@ class ApplicationResponse(BaseModel):
     notes: str | None
     created_at: datetime
     updated_at: datetime
+    company: str | None = None
+    role: str | None = None
 
     model_config = {"from_attributes": True}
 

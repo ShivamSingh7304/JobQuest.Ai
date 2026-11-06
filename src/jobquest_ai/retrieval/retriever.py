@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Any
 from qdrant_client import models
@@ -8,6 +9,8 @@ from jobquest_ai.retrieval.vector_store import (
     add_documents,
     get_qdrant_vector_store,
 )
+
+logger = logging.getLogger(__name__)
 class RetrievalError(Exception):
     """Raised when indexing or retrieval fails."""
 
@@ -24,6 +27,7 @@ def index_documents(
     {"technology": "Python", "version": "3.12"}
     """
 
+    logger.info("retrieval_index_started source=%s", source_path)
     try:
         chunks = load_and_split_documents(
             source_path=source_path,
@@ -34,14 +38,17 @@ def index_documents(
 
         ids = add_documents(chunks)
 
-        return {
+        result = {
             "source_path": str(source_path),
             "chunks_created": len(chunks),
             "chunks_indexed": len(ids),
             "document_ids": ids,
         }
+        logger.info("retrieval_index_completed chunks=%s indexed=%s", len(chunks), len(ids))
+        return result
 
     except Exception as exc:
+        logger.exception("retrieval_index_failed source=%s", source_path)
         raise RetrievalError(
             f"Document indexing failed: {exc}"
         ) from exc
@@ -64,6 +71,7 @@ def retrieve(
     integration, not a percentage or guaranteed probability.
     """
 
+    logger.info("retrieval_started query_length=%s top_k=%s", len(query) if isinstance(query, str) else 0, top_k)
     if not query or not query.strip():
         raise ValueError("Query cannot be empty.")
 
@@ -112,9 +120,11 @@ def retrieve(
                 }
             )
 
+        logger.info("retrieval_completed result_count=%s", len(retrieved))
         return retrieved
 
     except Exception as exc:
+        logger.exception("retrieval_failed")
         raise RetrievalError(
             f"Knowledge retrieval failed: {exc}"
         ) from exc

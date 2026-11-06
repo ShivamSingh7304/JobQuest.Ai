@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 
 from jobquest_ai.api.schemas import CalendarConnectionResponse, CalendarEventResponse, CalendarEventsResponse
@@ -21,7 +22,9 @@ from jobquest_ai.mcp.client import list_calendar_events, list_calendar_events_re
 
 router = APIRouter(prefix="/calendar", tags=["Calendar"])
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
-CLIENT_FILE = Path(os.getenv("GOOGLE_OAUTH_CLIENT_FILE", str(PROJECT_ROOT / "oauth-client.json"))).expanduser()
+load_dotenv(PROJECT_ROOT / ".env")
+_configured_client_file = Path(os.getenv("GOOGLE_OAUTH_CLIENT_FILE", "oauth-client.json")).expanduser()
+CLIENT_FILE = _configured_client_file if _configured_client_file.is_absolute() else PROJECT_ROOT / _configured_client_file
 REDIRECT_URI = os.getenv("GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/calendar/oauth2callback")
 SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 _pending_flows: dict[str, tuple[int, Flow]] = {}

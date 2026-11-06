@@ -15,6 +15,7 @@ from jobquest_ai.database.connection import get_db
 from jobquest_ai.database.models.user import User
 from jobquest_ai.database.repositories.resume_repository import ResumeRepository
 from jobquest_ai.database.repositories.job_repository import JobRepository
+from jobquest_ai.database.repositories.application_repository import ApplicationRepository
 from jobquest_ai.jobs.job_service import JobService, JobServiceError
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
@@ -69,6 +70,21 @@ def save_job(
             apply_url=str(payload.application_url),
             posted_at=posted_at,
         )
+        application_repository = ApplicationRepository(db)
+        if application_repository.get_by_user_and_job(
+            user_id=current_user.id,
+            job_id=job.id,
+        ) is None:
+            resumes = ResumeRepository(db).list_by_user(
+                user_id=current_user.id,
+                limit=1,
+            )
+            application_repository.create(
+                user_id=current_user.id,
+                job_id=job.id,
+                resume_id=resumes[0].id if resumes else None,
+                status="saved",
+            )
     except Exception as exc:
         rollback = getattr(db, "rollback", None)
         if callable(rollback):

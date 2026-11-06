@@ -9,6 +9,7 @@ from jobquest_ai.memory.memory_extractor import MemoryExtractionError
 from jobquest_ai.memory.memory_manager import MemoryManager
 from jobquest_ai.memory.user_md_manager import format_user_context
 from jobquest_ai.tools.calendar_tools import reset_calendar_context, set_calendar_context
+from jobquest_ai.tools.job_tools import reset_job_context, set_job_context
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ class CareerAgent:
         ]
 
         calendar_context = set_calendar_context(self._db, user.id) if self._db is not None else None
+        job_context = set_job_context(self._db, user.id) if self._db is not None else None
         try:
             result = agent.invoke(
                 {"messages": messages},
@@ -95,6 +97,8 @@ class CareerAgent:
         finally:
             if calendar_context is not None:
                 reset_calendar_context(calendar_context)
+            if job_context is not None:
+                reset_job_context(job_context)
 
         if not isinstance(result, dict):
             raise CareerAgentError(

@@ -2,11 +2,30 @@
 """Job search and job-matching tools."""
 
 import json
+import contextvars
 from typing import Any
 
 from langchain_core.tools import tool
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
+from jobquest_ai.database.models.application import Application
+from jobquest_ai.database.models.job import Job
+from jobquest_ai.database.models.resume import Resume
 from jobquest_ai.jobs.job_service import JobService, JobServiceError
+from jobquest_ai.jobs.job_matcher import JobMatcher
+
+_job_context: contextvars.ContextVar[tuple[Session, int] | None] = contextvars.ContextVar(
+    "jobquest_job_context", default=None
+)
+
+
+def set_job_context(db: Session, user_id: int):
+    return _job_context.set((db, user_id))
+
+
+def reset_job_context(token: contextvars.Token):
+    _job_context.reset(token)
 
 
 def _format_result(result: dict[str, Any]) -> str:
@@ -138,4 +157,60 @@ def match_job_to_skills(
         })
 
 
-TOOLS = [search_jobs, match_job_to_skills]
+@tool
+def rank_saved_jobs() -> str:
+    """Rank the authenticated user's saved jobs against their latest resume.
+
+    Use this when the user asks which saved job, saved opportunity, or saved
+    application fits them best. Never ask the user to paste saved jobs first.
+    """
+    context = _job_context.get()
+    if context is None:
+        return json.dumps({"success": False, "error": "User job context is unavailable."})
+
+    db, user_id = context
+    rows = db.execute(
+        select(Application, Job)
+        .join(Job, Application.job_id == Job.id)
+        .where(Application.user_id == user_id)
+        .order_by(Application.updated_at.desc())
+    ).all()
+    if not rows:
+        return json.dumps({"success": True, "saved_job_count": 0, "jobs": []})
+
+    resume = db.scalar(
+        select(Resume)
+        .where(Resume.user_id == user_id)
+        .order_by(Resume.created_at.desc())
+    )
+    profile = dict(resume.parsed_data or {}) if resume and resume.parsed_data else {}
+    jobs = []
+    for application, job in rows:
+        jobs.append({
+            "application_id": application.id,
+            "application_status": application.status,
+            "job_id": job.id,
+            "external_job_id": job.external_job_id,
+            "title": job.title,
+            "company": job.company,
+            "description": job.description or "",
+            "location": job.location,
+            "work_mode": job.work_mode,
+            "employment_type": job.employment_type,
+            "apply_url": job.apply_url,
+        })
+
+    ranked = JobMatcher().match_jobs(
+        candidate_profile=profile,
+        jobs=jobs,
+        top_k=len(jobs),
+    ) if profile else jobs
+    return _format_result({
+        "success": True,
+        "saved_job_count": len(ranked),
+        "resume_available": bool(profile),
+        "jobs": ranked,
+    })
+
+
+TOOLS = [search_jobs, match_job_to_skills, rank_saved_jobs]
