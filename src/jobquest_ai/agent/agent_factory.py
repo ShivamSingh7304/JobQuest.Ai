@@ -1,6 +1,4 @@
 from collections.abc import Callable, Sequence
-import logging
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -18,29 +16,6 @@ from jobquest_ai.memory.memory_manager import MemoryManager
 AgentBuilder = Callable[..., Any]
 RouteCategoryKey = tuple[str, str]
 PROMPT_DIRECTORY = Path(__file__).resolve().parents[1] / "prompts"
-logger = logging.getLogger(__name__)
-
-
-@lru_cache(maxsize=4)
-def _get_cached_groq_model(
-    model_name: str,
-    api_key: str,
-    max_tokens: int | None = None,
-) -> ChatGroq:
-    """Create one reusable Groq client per model/key configuration."""
-    logger.info("llm_client_initialization_started model=%s", model_name)
-    options = {
-        "model": model_name,
-        "temperature": 0,
-        "api_key": api_key,
-    }
-    if max_tokens is not None:
-        options["max_tokens"] = max_tokens
-    client = ChatGroq(
-        **options,
-    )
-    logger.info("llm_client_initialization_completed model=%s", model_name)
-    return client
 
 
 class AgentConfigurationError(Exception):
@@ -58,7 +33,6 @@ def _read_prompt(prompt_name: str) -> str:
         if path.is_file():
             prompt = path.read_text(encoding="utf-8").strip()
             if prompt:
-                logger.debug("prompt_loaded prompt=%s characters=%s", candidate, len(prompt))
                 return prompt
 
     raise AgentConfigurationError(
@@ -88,7 +62,12 @@ def build_agent(
                 "GROQ_API_KEY is not configured."
             )
         try:
-            model = _get_cached_groq_model(config.groq_model, config.groq_api_key, 500)
+            model = ChatGroq(
+                model=config.groq_model,
+                temperature=0,
+                api_key=config.groq_api_key,
+                max_tokens=500,
+            )
         except Exception as exc:
             raise AgentConfigurationError(
                 "Unable to initialize the configured language model."
@@ -105,19 +84,16 @@ def build_agent(
                 ToolRoute("application", "career_coach.md")
             ),
             *ToolRouter().get_tools(ToolRoute("retrieval", "career_coach.md")),
-            *ToolRouter().get_tools(ToolRoute("calendar", "career_coach.md")),
         ]
     )
     builder = agent_builder or create_agent
     try:
-        logger.info("agent_build_started prompt=%s tool_count=%s", prompt_name, len(all_tools))
         return builder(
             model,
             tools=all_tools,
             system_prompt=_system_instructions(prompt_name),
         )
     except Exception as exc:
-        logger.exception("agent_build_failed prompt=%s", prompt_name)
         raise AgentConfigurationError(
             "Unable to build the LangChain career agent."
         ) from exc
@@ -144,14 +120,12 @@ class AgentFactory:
             return self._agents[cache_key]
 
         try:
-            logger.info("routed_agent_build_started category=%s prompt=%s", route.category, route.prompt_name)
             agent = self._builder(
                 self._model,
                 tools=self._router.get_tools(route),
                 system_prompt=_system_instructions(route.prompt_name),
             )
         except Exception as exc:
-            logger.exception("routed_agent_build_failed category=%s", route.category)
             raise AgentConfigurationError(
                 "Unable to build the routed career agent."
             ) from exc
@@ -175,7 +149,11 @@ def create_career_agent(
                 "GROQ_API_KEY is not configured."
             )
         try:
-            model = _get_cached_groq_model(config.groq_model, config.groq_api_key)
+            model = ChatGroq(
+                model=config.groq_model,
+                temperature=0,
+                api_key=config.groq_api_key,
+            )
         except Exception as exc:
             raise AgentConfigurationError(
                 "Unable to initialize the configured language model."
@@ -185,5 +163,4 @@ def create_career_agent(
     return CareerAgent(
         agent_factory=factory,
         memory_manager=MemoryManager(db) if db is not None else None,
-        db=db,
     )
